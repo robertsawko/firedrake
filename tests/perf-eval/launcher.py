@@ -31,7 +31,7 @@ if problem == 'HELMHOLTZ':
 
 ### RUN PROBLEM ###
 
-mesh_size = 8
+mesh_size = 5
 poly_order = 2
 results = []
 
@@ -57,7 +57,7 @@ if opt in ['ALL', 'LICM']:
 if opt in ['ALL', 'LICM_AP']:
     print "Run LICM+ALIGN+PADDING Helmholtz"
     os.environ['PYOP2_IR_AP'] = 'True'
-    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "gnu")' % ap.AUTOVECT
+    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "intel")' % ap.AUTOVECT
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.LICM_AP.dat')
@@ -67,7 +67,7 @@ if opt in ['ALL', 'LICM_AP']:
 
 if opt in ['ALL', 'LICM_AP_VECT']:
     print "Run LICM+ALIGN+PADDING+VECT Helmholtz"
-    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "gnu")' % ap.V_OP_UAJ
+    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "intel")' % ap.V_OP_UAJ
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.LICM_AP_VECT.dat')

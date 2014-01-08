@@ -11,7 +11,7 @@ from firedrake import *
 
 def run_helmholtz(x, degree=2):
     # Create mesh and define function space
-    mesh = UnitSquareMesh(2 ** x, 2 ** x)
+    mesh = UnitCubeMesh(2 ** x, 2 ** x, 2 ** x)
     V = FunctionSpace(mesh, "CG", degree)
 
     # Define variational problem
