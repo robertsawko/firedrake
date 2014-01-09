@@ -5,7 +5,7 @@ import cProfile
 import pstats
 import os
 
-opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_AP_VECT']
+opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['HELMHOLTZ', 'BURGERS']
 
 
@@ -36,7 +36,7 @@ elif problem == 'BURGERS':
 ### RUN PROBLEM ###
 
 mesh_size = 6
-poly_order = 5
+poly_order = 4
 results = []
 
 if opt in ['ALL', 'NORMAL']:
@@ -86,3 +86,15 @@ if opt in ['ALL', 'LICM_AP_VECT']:
     p.sort_stats('time').print_stats(10)
     print "*****************************************\n\n"
 
+
+if opt in ['ALL', 'LICM_AP_VECT_EXT']:
+    print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s" % problem
+    os.environ['PYOP2_IR_LICM'] = 'True'
+    os.environ['PYOP2_IR_AP'] = 'True'
+    os.environ['PYOP2_IR_TILE'] = 'False'
+    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "intel")' % ap.V_OP_UAJ_EXTRA
+    cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_EXT.dat')
+    print "*****************************************"
+    p = pstats.Stats('cprof.LICM_AP_VECT_EXT.dat')
+    p.sort_stats('time').print_stats(10)
+    print "*****************************************\n\n"
