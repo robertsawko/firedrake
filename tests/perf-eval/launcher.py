@@ -6,7 +6,7 @@ import pstats
 import os
 
 opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_AP_VECT']
-problems = ['HELMHOLTZ']
+problems = ['HELMHOLTZ', 'BURGERS']
 
 
 if len(sys.argv) in [2, 3]:
@@ -27,16 +27,20 @@ else:
 
 if problem == 'HELMHOLTZ':
     from helmholtz import run_helmholtz as run_prob
+    print "Running Helmholtz problem"
+elif problem == 'BURGERS':
+    from burgers import run_burgers as run_prob
+    print "Running Burgers problem"
 
 
 ### RUN PROBLEM ###
 
-mesh_size = 5
-poly_order = 2
+mesh_size = 6
+poly_order = 5
 results = []
 
 if opt in ['ALL', 'NORMAL']:
-    print "Run NORMAL Helmholtz"
+    print "Run NORMAL %s" % problem
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.NORMAL.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.NORMAL.dat')
@@ -45,8 +49,11 @@ if opt in ['ALL', 'NORMAL']:
 
 
 if opt in ['ALL', 'LICM']:
-    print "Run LICM Helmholtz"
+    print "Run LICM %s" % problem
     os.environ['PYOP2_IR_LICM'] = 'True'
+    os.environ['PYOP2_IR_AP'] = 'False'
+    os.environ['PYOP2_IR_TILE'] = 'False'
+    os.environ['PYOP2_IR_VECT'] = 'None'
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.LICM.dat')
@@ -55,9 +62,11 @@ if opt in ['ALL', 'LICM']:
 
 
 if opt in ['ALL', 'LICM_AP']:
-    print "Run LICM+ALIGN+PADDING Helmholtz"
+    print "Run LICM+ALIGN+PADDING %s" % problem
+    os.environ['PYOP2_IR_LICM'] = 'True'
     os.environ['PYOP2_IR_AP'] = 'True'
-    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "intel")' % ap.AUTOVECT
+    os.environ['PYOP2_IR_TILE'] = 'False'
+    os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.LICM_AP.dat')
@@ -66,8 +75,11 @@ if opt in ['ALL', 'LICM_AP']:
 
 
 if opt in ['ALL', 'LICM_AP_VECT']:
-    print "Run LICM+ALIGN+PADDING+VECT Helmholtz"
-    os.environ['PYOP2_IR_VECT'] = '((%s, 2), "avx", "intel")' % ap.V_OP_UAJ
+    print "Run LICM+ALIGN+PADDING+VECT %s" % problem
+    os.environ['PYOP2_IR_LICM'] = 'True'
+    os.environ['PYOP2_IR_AP'] = 'True'
+    os.environ['PYOP2_IR_TILE'] = 'False'
+    os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.V_OP_UAJ
     cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT.dat')
     print "*****************************************"
     p = pstats.Stats('cprof.LICM_AP_VECT.dat')
