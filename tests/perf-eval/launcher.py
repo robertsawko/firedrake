@@ -6,12 +6,16 @@ import pstats
 import os
 import StringIO
 
-opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
+opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS']
 
 
-if len(sys.argv) in [2, 3]:
-    if len(sys.argv) == 3 and sys.argv[2] in problems:
+if len(sys.argv) in [2, 3, 4]:
+    if len(sys.argv) == 4:
+        poly_order = int(sys.argv[3])
+    else:
+        poly_order = None
+    if len(sys.argv) >= 3 and sys.argv[2] in problems:
         problem = sys.argv[2]
     else:
         problem = problems[0]
@@ -43,7 +47,11 @@ problem = problem.lower()
 ### RUN PROBLEM ###
 
 mesh_size = 4
-poly_orders = [1, 2, 3, 4 ,5]
+
+if poly_order:
+    poly_orders = [poly_order]
+else:
+    poly_orders = [1, 2, 3, 4 ,5]
 
 for poly_order in poly_orders:
     results = []
@@ -53,6 +61,10 @@ for poly_order in poly_orders:
 
     if opt in ['ALL', 'NORMAL']:
         print "Run NORMAL %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_IR_LICM'] = 'False'
+        os.environ['PYOP2_IR_AP'] = 'False'
+        os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_IR_VECT'] = 'None'
         cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.NORMAL.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.NORMAL.dat')
@@ -96,6 +108,23 @@ for poly_order in poly_orders:
         digest.write(stat_parser.getvalue())
         digest.write("*****************************************\n\n")
         os.remove('cprof.LICM_AP.dat')
+
+
+    if opt in ['ALL', 'LICM_IR_AP_TILE']:
+        print "Run LICM+ALIGN+PADDING+TILING %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_IR_LICM'] = 'True'
+        os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_TILE'] = 'True'
+        os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
+        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_TILE.dat')
+        digest.write("*****************************************\n")
+        p = pstats.Stats('cprof.LICM_AP_TILE.dat')
+        stat_parser = StringIO.StringIO()
+        p.stream = stat_parser
+        p.sort_stats('time').print_stats(10)
+        digest.write(stat_parser.getvalue())
+        digest.write("*****************************************\n\n")
+        os.remove('cprof.LICM_AP_TILE.dat')
 
 
     if opt in ['ALL', 'LICM_AP_VECT']:
