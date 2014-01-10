@@ -11,8 +11,7 @@ from firedrake import *
 
 def run_helmholtz(x, degree=2):
     # Create mesh and define function space
-    #mesh = UnitCubeMesh(2 ** x, 2 ** x, 2 ** x)
-    mesh = UnitSquareMesh(2 ** x, 2 ** x)
+    mesh = UnitCubeMesh(2 ** x, 2 ** x, 2 ** x)
     V = FunctionSpace(mesh, "CG", degree)
 
     # Define variational problem
@@ -30,12 +29,4 @@ def run_helmholtz(x, degree=2):
     x = Function(V)
     solve(a == L, x, solver_parameters={'ksp_type': 'cg'})
 
-    # Analytical solution
-    #f.interpolate(Expression("cos(x[0]*pi*2)*cos(x[1]*pi*2)"))
-    #return sqrt(assemble(dot(x - f, x - f) * dx)), x, f
-
     return x
-
-
-# def test_firedrake_helmholtz():
-    # diff = np.array([helmholtz(i)[0] for i in range(3, 6)])
