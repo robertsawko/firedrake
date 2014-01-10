@@ -44,6 +44,19 @@ elif problem == 'BURGERS':
 problem = problem.lower()
 
 
+### CLEAN THE FFC CACHE FIRST ###
+
+print "Cleaning the FFC cache..."
+folder = "/tmp/pyop2-ffc-kernel-cache-uid665"
+for the_file in os.listdir(folder):
+    file_path = os.path.join(folder, the_file)
+    try:
+        if os.path.isfile(file_path):
+            os.unlink(file_path)
+    except Exception, e:
+        print e
+
+
 ### RUN PROBLEM ###
 
 mesh_size = 4
@@ -110,11 +123,11 @@ for poly_order in poly_orders:
         os.remove('cprof.LICM_AP.dat')
 
 
-    if opt in ['ALL', 'LICM_IR_AP_TILE']:
+    if opt in ['ALL', 'LICM_AP_TILE']:
         print "Run LICM+ALIGN+PADDING+TILING %s p%d" % (problem, poly_order)
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
-        os.environ['PYOP2_IR_TILE'] = 'True'
+        os.environ['PYOP2_IR_TILE'] = '(True, 8)'
         os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
         cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_TILE.dat')
         digest.write("*****************************************\n")
