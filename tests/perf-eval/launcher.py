@@ -79,6 +79,15 @@ else:
     poly_orders = _poly_orders
 
 for poly_order in poly_orders:
+
+    # First, find out size of iteration space with a "test" execution
+    if opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
+        print ('Finding out size of iteration space...'),
+        os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
+        run_prob(1, poly_order)
+        its_size = int(os.environ['PYOP2_PROBLEM_SIZE'])
+        print "Found! %d X %d" % (its_size, its_size)
+
     results = []
     digest = open ("digest_%s_p%d.txt" % (problem, poly_order),"w")
     dump_name = "code_%s_p%s.txt" % (problem, poly_order)
@@ -87,6 +96,7 @@ for poly_order in poly_orders:
     if os.path.exists(dump_name):
         os.remove(dump_name)
 
+    # Adjust mesh size to mitigate runtime
     if poly_order == 5:
         mesh_size -= 2
     elif poly_order == 4:
@@ -167,7 +177,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 5), "avx", "intel")' % ap.V_OP_UAJ
+        os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.V_OP_UAJ
         cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM_AP_VECT.dat')
