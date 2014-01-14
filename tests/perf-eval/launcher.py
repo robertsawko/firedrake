@@ -120,10 +120,13 @@ for poly_order in poly_orders:
         os.remove(dump_name)
 
     # Adjust mesh size to mitigate runtime
-    if poly_order == 5:
-        mesh_size -= 2
+    if poly_order == 1:
+        mesh_size += 1
     elif poly_order == 4:
         mesh_size -= 1
+    elif poly_order == 5:
+        mesh_size -= 2
+
 
     print "*****************************************"
 
