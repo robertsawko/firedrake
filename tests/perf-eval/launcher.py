@@ -5,31 +5,44 @@ import cProfile
 import pstats
 import os
 import StringIO
+import warnings
 
 opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS']
 _poly_orders = [1, 2, 3, 4 ,5]
 
+DEFAULT_TILE_SIZE = 20
+DEFAULT_UNROLL_FACTOR = 1
 
-if len(sys.argv) in [2, 3, 4]:
-    if len(sys.argv) == 4:
-        poly_order = int(sys.argv[3])
-    else:
-        poly_order = None
-    if len(sys.argv) >= 3 and sys.argv[2] in problems:
-        problem = sys.argv[2]
-    else:
-        problem = problems[0]
 
-    if sys.argv[1] == '--help':
-        _opts = "\n".join(["- %s" % i for i in opts])
-        print "Possible optimisations are:\n" + _opts
-        sys.exit(0)
-    else:
-        opt = sys.argv[1] if sys.argv[1] in opts else 'ALL'
+### PARSE CMD LINE ARGUMENTS ###
+
+if len(sys.argv) not in [4, 5]:
+    print "Usage: opt problem poly [--singlerun]"
+    sys.exit(0)
+
+if len(sys.argv) == 5 and sys.argv[5] == "--singlerun":
+    its_size = False
+    print "Executing a single run"
 else:
-    opt = 'ALL'
-    problem = problems[0]
+    its_size = True
+
+if not sys.argv[3].isdigit():
+    print "Polynomial order must be an integer. Exiting..."
+    sys.exit(0)
+poly_order = int(sys.argv[3])
+
+problem = sys.argv[2] if sys.argv[2] in problems else problems[0]
+
+if sys.argv[1] == '--help':
+    _opts = "\n".join(["- %s" % i for i in opts])
+    print "Possible optimisations are:\n" + _opts
+    sys.exit(0)
+else:
+    opt = sys.argv[1] if sys.argv[1] in opts else 'ALL'
+
+
+### SET THE PROBLEM TO EXECUTE ###
 
 if problem == 'HELMHOLTZ_2D':
     from helmholtz_2d import run_helmholtz as run_prob
@@ -55,6 +68,16 @@ elif problem == 'BURGERS':
 
 problem = problem.lower()
 
+simd_isa = os.environ.get('PYOP2_SIMD_ISA')
+if not simd_isa:
+    print "PYOP2_SIMD_ISA is not set. Exiting..."
+    sys.exit(0)
+elif simd_isa == "avx":
+    print "Read PYOP2_SIMD_ISA: avx. Vector length is therefore set to 4"
+    vect_len = 4
+else:
+    print "Unrecognised PYOP2_SIMD_ISA. Exiting..."
+    sys.exit(0)
 
 ### CLEAN THE FFC CACHE FIRST ###
 
@@ -81,7 +104,7 @@ else:
 for poly_order in poly_orders:
 
     # First, find out size of iteration space with a "test" execution
-    if opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
+    if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
         print ('Finding out size of iteration space...'),
         os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
         run_prob(1, poly_order)
@@ -156,54 +179,70 @@ for poly_order in poly_orders:
 
 
     if opt in ['ALL', 'LICM_AP_TILE']:
-        print "Run LICM+ALIGN+PADDING+TILING %s p%d" % (problem, poly_order)
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
-        os.environ['PYOP2_IR_TILE'] = '(True, 8)'
         os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_TILE.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM_AP_TILE.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM_AP_TILE.dat')
+        tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
+        for i in tile_sizes:
+            print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
+            os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
+            cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_TILE_%d.dat' % i)
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.LICM_AP_TILE_%d.dat' % i)
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.LICM_AP_TILE_%d.dat' % i)
 
 
     if opt in ['ALL', 'LICM_AP_VECT']:
-        print "Run LICM+ALIGN+PADDING+VECT %s p%d" % (problem, poly_order)
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.V_OP_UAJ
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM_AP_VECT.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM_AP_VECT.dat')
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len)]
+        for i in unroll_factors:
+            print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
+            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
+            cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.LICM_AP_VECT_UF%d.dat' % i)
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.LICM_AP_VECT_UF%d.dat' % i)
 
 
     if opt in ['ALL', 'LICM_AP_VECT_EXT']:
-        print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s p%d" % (problem, poly_order)
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 6), "avx", "intel")' % ap.V_OP_UAJ_EXTRA
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_EXT.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM_AP_VECT_EXT.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM_AP_VECT_EXT.dat')
+        import math
+        its_size = int(math.ceil(its_size / float(vect_len))) * vect_len
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len + 1)]
+        for i in unroll_factors:
+            print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s p%d, with unroll factor %d" % (problem, poly_order, i)
+            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
+            with warnings.catch_warnings(record=True) as w:
+               # Cause all warnings to always be triggered.
+                warnings.simplefilter("always")
+                # Execute
+                cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                if not len(w):
+                    digest.write("*****************************************\n")
+                    p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                    stat_parser = StringIO.StringIO()
+                    p.stream = stat_parser
+                    p.sort_stats('time').print_stats('form_cell_integral_0')
+                    digest.write(stat_parser.getvalue())
+                    digest.write("*****************************************\n\n")
+                else:
+                    print (w[0].message),
+                    print "... Discarding result"
+                os.remove('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
 
 
     digest.close()
