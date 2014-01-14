@@ -32,7 +32,11 @@ if not sys.argv[3].isdigit():
     sys.exit(0)
 poly_order = int(sys.argv[3])
 
-problem = sys.argv[2] if sys.argv[2] in problems else problems[0]
+if sys.argv[2] in problems:
+    problem = sys.argv[2]
+else:
+    warnings.warn("Warning: %s problem does not exist. Exiting..." % sys.argv[2])
+    sys.exit(0)
 
 if sys.argv[1] == '--help':
     _opts = "\n".join(["- %s" % i for i in opts])
@@ -59,7 +63,7 @@ elif problem == 'MASS_2D':
 elif problem == 'MASS_3D':
     from mass_3d import run_mass as run_prob
     print "Running Mass 3D problem"
-    mesh_size = 5
+    mesh_size = 4
 elif problem == 'BURGERS':
     from burgers import run_burgers as run_prob
     print "Running Burgers problem"
