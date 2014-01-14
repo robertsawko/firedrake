@@ -51,7 +51,7 @@ else:
 if problem == 'HELMHOLTZ_2D':
     from helmholtz_2d import run_helmholtz as run_prob
     print "Running Helmholtz 2D problem"
-    mesh_size = 4
+    mesh_size = 8
 elif problem == 'HELMHOLTZ_3D':
     from helmholtz_3d import run_helmholtz as run_prob
     print "Running Helmholtz 3D problem"
