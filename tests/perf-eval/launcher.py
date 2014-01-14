@@ -8,7 +8,7 @@ import StringIO
 import warnings
 
 opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
-problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS']
+problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS_2D', 'ADVDIFF_2D']
 _poly_orders = [1, 2, 3, 4 ,5]
 
 DEFAULT_TILE_SIZE = 20
@@ -64,10 +64,14 @@ elif problem == 'MASS_3D':
     from mass_3d import run_mass as run_prob
     print "Running Mass 3D problem"
     mesh_size = 4
-elif problem == 'BURGERS':
+elif problem == 'BURGERS_2D':
     from burgers import run_burgers as run_prob
-    print "Running Burgers problem"
+    print "Running Burgers 2D problem"
     mesh_size = 4
+elif problem == 'ADVDIFF_2D':
+    from adv_diff_2d import run_advdiff as run_prob
+    print "Running Advection-Diffusion 2D problem"
+    mesh_size = 8
 
 
 problem = problem.lower()
