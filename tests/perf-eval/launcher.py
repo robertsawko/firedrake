@@ -9,7 +9,7 @@ import warnings
 
 opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS_2D', 'BURGERS_3D', 'ADVDIFF_2D', 'ADVDIFF_3D']
-_poly_orders = [1, 2, 3, 4 ,5]
+_poly_orders = [1, 2, 3, 4]
 
 DEFAULT_TILE_SIZE = 20
 DEFAULT_UNROLL_FACTOR = 1
@@ -95,6 +95,19 @@ else:
     print "Unrecognised PYOP2_SIMD_ISA. Exiting..."
     sys.exit(0)
 
+compiler = os.environ.get('PYOP2_BACKEND_COMPILER')
+
+if not compiler:
+    print "PYOP2_BACKEND_COMPILER is not set. Exiting..."
+    sys.exit(0)
+elif compiler == "intel":
+    print "Read PYOP2_BACKEND_COMPILER: intel."
+elif compiler == "gnu":
+    print "Read PYOP2_BACKEND_COMPILER: gnu."
+else:
+    print "Unrecognised PYOP2_BACKEND_COMPILER. Exiting..."
+    sys.exit(0)
+
 ### CLEAN THE FFC CACHE FIRST ###
 
 print "Cleaning the FFC cache..."
@@ -111,6 +124,7 @@ for the_file in os.listdir(folder):
 ### RUN PROBLEM ###
 
 os.popen('mkdir -p dump_code_%s' % problem)
+os.popen('mkdir -p results_%s' % problem)
 
 if poly_order:
     poly_orders = [poly_order]
@@ -123,7 +137,7 @@ for poly_order in poly_orders:
     if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
         print ('Finding out size of iteration space...'),
         os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
-        run_prob(1, poly_order)
+        run_prob(3, poly_order)
         its_size = int(os.environ['PYOP2_PROBLEM_SIZE'])
         print "Found! %d X %d" % (its_size, its_size)
 
@@ -152,7 +166,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.NORMAL.dat')
+        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.NORMAL.dat')
         stat_parser = StringIO.StringIO()
@@ -169,7 +183,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM.dat')
+        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM.dat')
         stat_parser = StringIO.StringIO()
@@ -186,7 +200,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
-        cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP.dat')
+        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM_AP.dat')
         stat_parser = StringIO.StringIO()
@@ -205,7 +219,7 @@ for poly_order in poly_orders:
         for i in tile_sizes:
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
             os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
-            cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_TILE_%d.dat' % i)
+            cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_TILE'))", 'cprof.LICM_AP_TILE_%d.dat' % i)
             digest.write("*****************************************\n")
             p = pstats.Stats('cprof.LICM_AP_TILE_%d.dat' % i)
             stat_parser = StringIO.StringIO()
@@ -220,11 +234,11 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len)]
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
         for i in unroll_factors:
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
-            cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
+            cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_VECT'))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
             digest.write("*****************************************\n")
             p = pstats.Stats('cprof.LICM_AP_VECT_UF%d.dat' % i)
             stat_parser = StringIO.StringIO()
@@ -249,7 +263,7 @@ for poly_order in poly_orders:
                # Cause all warnings to always be triggered.
                 warnings.simplefilter("always")
                 # Execute
-                cProfile.run("results.append(run_prob(mesh_size, poly_order))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
                 if not len(w):
                     digest.write("*****************************************\n")
                     p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
@@ -263,7 +277,15 @@ for poly_order in poly_orders:
                     print "... Discarding result"
                 os.remove('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
 
-
-    digest.close()
+    import numpy
+    print "Checking the correctness of results...",
+    found_one_error = False
+    for r, name in results:
+        if not numpy.allclose(results[0][0].dat.data, r.dat.data):
+            warnings.warn("Warning: %s test case result differs from %s." % (name, results[0].name))
+            found_one_error = True
+    if not found_one_error:
+        print "OK! Results match."
 
 os.popen('mv code_* dump_code_%s' % problem)
+os.popen('mv digest_* results_%s' % problem)
