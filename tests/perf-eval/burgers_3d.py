@@ -3,10 +3,10 @@
 from firedrake import *
 
 def run_burgers(n=30, degree=1):
-    mesh = UnitSquareMesh(n, n)
+    mesh = UnitCubeMesh(n, n, n)
     V = VectorFunctionSpace(mesh, "CG", degree)
 
-    ic = project(Expression(["sin(pi*x[0])", 0]), V)
+    ic = project(Expression(["sin(pi*x[0])", 0, 0]), V)
 
     u_ = Function(ic, name="Velocity")
     u = Function(V, name="VelocityNext")

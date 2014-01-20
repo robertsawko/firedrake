@@ -2,9 +2,9 @@
 
 from firedrake import *
 
-def run_advdiff(n=30, degree=1):
+def run_advdiff(n, degree=1):
     dt = 0.0001
-    mesh = UnitSquareMesh(2 ** n, 2 ** n)
+    mesh = UnitCubeMesh(2 ** n, 2 ** n, 2 ** n)
     
     T = FunctionSpace(mesh, "CG", degree)
     V = VectorFunctionSpace(mesh, "CG", degree)

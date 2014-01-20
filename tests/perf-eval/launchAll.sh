@@ -1,4 +1,4 @@
-declare -a PROBLEMS=(MASS_2D MASS_3D HELMHOLTZ_2D HELMHOLTZ_3D ADVDIFF_2D)
+declare -a PROBLEMS=(MASS_2D MASS_3D HELMHOLTZ_2D HELMHOLTZ_3D ADVDIFF_2D ADVDIFF_3D BURGERS_2D BURGERS_3D)
 
 if [ $# -eq 0 ]
 then
@@ -15,7 +15,7 @@ fi
 
 for p in "${RUN_PROBLEMS[@]}"
 do
-    for i in 1 2 3 4 5
+    for i in 1 2 3 4
     do
         python launcher.py ALL $p $i
     done
