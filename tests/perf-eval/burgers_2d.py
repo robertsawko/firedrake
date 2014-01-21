@@ -3,7 +3,7 @@
 from firedrake import *
 
 def run_burgers(n=30, degree=1):
-    mesh = UnitSquareMesh(n, n)
+    mesh = UnitSquareMesh(2 ** n, 2 ** n)
     V = VectorFunctionSpace(mesh, "CG", degree)
 
     ic = project(Expression(["sin(pi*x[0])", 0]), V)
@@ -26,11 +26,13 @@ def run_burgers(n=30, degree=1):
     #outfile = File("burgers.pvd")
     #outfile << u
 
-    t = 0.0
-    end = 0.2
-    while (t <= end):
-        print t
-        solve(F == 0, u)
-        u_.assign(u)
-        t += timestep
-        #outfile << u
+    #t = 0.0
+    #end = 0.2
+    #while (t <= end):
+        #print t
+    solve(F == 0, u)
+        #u_.assign(u)
+        #t += timestep
+        #outfile << 0
+
+    return u

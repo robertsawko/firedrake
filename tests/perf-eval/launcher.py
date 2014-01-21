@@ -7,7 +7,7 @@ import os
 import StringIO
 import warnings
 
-opts = ['NORMAL', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
+opts = ['NORMAL', 'NOZEROS', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS_2D', 'BURGERS_3D', 'ADVDIFF_2D', 'ADVDIFF_3D']
 _poly_orders = [1, 2, 3, 4]
 
@@ -67,11 +67,11 @@ elif problem == 'MASS_3D':
 elif problem == 'BURGERS_2D':
     from burgers_2d import run_burgers as run_prob
     print "Running Burgers 2D problem"
-    mesh_size = 4
+    mesh_size = 8
 elif problem == 'BURGERS_3D':
     from burgers_3d import run_burgers as run_prob
     print "Running Burgers 3D problem"
-    mesh_size = 4
+    mesh_size = 5
 elif problem == 'ADVDIFF_2D':
     from adv_diff_2d import run_advdiff as run_prob
     print "Running Advection-Diffusion 2D problem"
@@ -132,6 +132,13 @@ else:
     poly_orders = _poly_orders
 
 for poly_order in poly_orders:
+    
+    # Init environment
+    os.environ['PYOP2_IR_LICM'] = 'False'
+    os.environ['PYOP2_IR_AP'] = 'False'
+    os.environ['PYOP2_IR_TILE'] = 'False'
+    os.environ['PYOP2_IR_VECT'] = 'None'
+    os.environ['PYOP2_NOZEROS'] = 'False'
 
     # First, find out size of iteration space with a "test" execution
     if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
@@ -152,6 +159,8 @@ for poly_order in poly_orders:
     # Adjust mesh size to mitigate runtime
     if poly_order == 1:
         mesh_size += 1
+    if poly_order == 2:
+        mesh_size += 1
     elif poly_order == 4:
         mesh_size -= 1
     elif poly_order == 5:
@@ -166,6 +175,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
+        os.environ['PYOP2_NOZEROS'] = 'False'
         cProfile.run("results.append((run_prob(mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.NORMAL.dat')
@@ -177,12 +187,31 @@ for poly_order in poly_orders:
         os.remove('cprof.NORMAL.dat')
 
 
+    if opt in ['ALL', 'NOZEROS']:
+        print "Run NOZEROS %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_IR_LICM'] = 'False'
+        os.environ['PYOP2_IR_AP'] = 'False'
+        os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_IR_VECT'] = 'None'
+        os.environ['PYOP2_NOZEROS'] = 'True'
+        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'NOZEROS'))", 'cprof.NOZEROS.dat')
+        digest.write("*****************************************\n")
+        p = pstats.Stats('cprof.NOZEROS.dat')
+        stat_parser = StringIO.StringIO()
+        p.stream = stat_parser
+        p.sort_stats('time').print_stats('form_cell_integral_0')
+        digest.write(stat_parser.getvalue())
+        digest.write("*****************************************\n\n")
+        os.remove('cprof.NOZEROS.dat')
+
+
     if opt in ['ALL', 'LICM']:
         print "Run LICM %s p%d" % (problem, poly_order)
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
+        os.environ['PYOP2_NOZEROS'] = 'False'
         cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM.dat')
@@ -200,6 +229,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_NOZEROS'] = 'False'
         cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM_AP.dat')
@@ -215,6 +245,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_NOZEROS'] = 'False'
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
         for i in tile_sizes:
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
@@ -234,6 +265,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_NOZEROS'] = 'False'
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
         for i in unroll_factors:
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
@@ -253,6 +285,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_NOZEROS'] = 'False'
         import math
         its_size = int(math.ceil(its_size / float(vect_len))) * vect_len
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len + 1)]
@@ -282,7 +315,7 @@ for poly_order in poly_orders:
     found_one_error = False
     for r, name in results:
         if not numpy.allclose(results[0][0].dat.data, r.dat.data):
-            warnings.warn("Warning: %s test case result differs from %s." % (name, results[0].name))
+            warnings.warn("Warning: %s test case result differs from %s." % (name, results[0][1]))
             found_one_error = True
     if not found_one_error:
         print "OK! Results match."
