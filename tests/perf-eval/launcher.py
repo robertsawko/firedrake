@@ -17,20 +17,22 @@ DEFAULT_UNROLL_FACTOR = 1
 
 ### PARSE CMD LINE ARGUMENTS ###
 
-if len(sys.argv) not in [4, 5]:
+if len(sys.argv) not in [3, 4]:
     print "Usage: opt problem poly [--singlerun]"
     sys.exit(0)
 
-if len(sys.argv) == 5 and sys.argv[5] == "--singlerun":
+if len(sys.argv) == 4 and sys.argv[3] == "--singlerun":
     its_size = False
-    print "Executing a single run"
+    print "Executing a single run with polynomial order 1"
+    sys.argv[3] = '1'
 else:
     its_size = True
 
 if not sys.argv[3].isdigit():
     print "Polynomial order must be an integer. Exiting..."
     sys.exit(0)
-poly_order = int(sys.argv[3])
+else:
+    poly_order = int(sys.argv[3])
 
 if sys.argv[2] in problems:
     problem = sys.argv[2]
@@ -136,20 +138,22 @@ else:
     print "Unrecognised PYOP2_BACKEND_COMPILER. Exiting..."
     sys.exit(0)
 
-### CLEAN THE FFC CACHE FIRST ###
+### TO CLEAN THE FFC CACHE ###
 
-print "Cleaning the FFC cache..."
-folder = "/tmp/pyop2-ffc-kernel-cache-uid665"
-for the_file in os.listdir(folder):
-    file_path = os.path.join(folder, the_file)
-    try:
-        if os.path.isfile(file_path):
-            os.unlink(file_path)
-    except Exception, e:
-        print e
+def clean_ffc_cache():
+    folder = "/tmp/pyop2-ffc-kernel-cache-uid665"
+    for the_file in os.listdir(folder):
+        file_path = os.path.join(folder, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+        except Exception, e:
+            print e
 
 
 ### RUN PROBLEM ###
+
+clean_ffc_cache()
 
 os.popen('mkdir -p dump_code_%s' % problem)
 os.popen('mkdir -p results_%s' % problem)
@@ -174,7 +178,7 @@ for poly_order in poly_orders:
     if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
         print ('Finding out size of iteration space...'),
         os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
-        run_prob(3, poly_order)
+        run_prob(this_mesh_size, poly_order)
         its_size = int(os.environ['PYOP2_PROBLEM_SIZE'])
         print "Found! %d X %d" % (its_size, its_size)
 
@@ -187,6 +191,7 @@ for poly_order in poly_orders:
     print "*****************************************"
 
     if opt in ['ALL', 'NORMAL']:
+        clean_ffc_cache()
         print "Run NORMAL %s p%d" % (problem, poly_order)
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NORMAL')
         os.environ['PYOP2_IR_LICM'] = 'False'
@@ -206,6 +211,7 @@ for poly_order in poly_orders:
 
 
     if opt in ['ALL', 'NOZEROS']:
+        clean_ffc_cache()
         print "Run NOZEROS %s p%d" % (problem, poly_order)
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NOZEROS')
         os.environ['PYOP2_IR_LICM'] = 'False'
@@ -225,6 +231,7 @@ for poly_order in poly_orders:
 
 
     if opt in ['ALL', 'LICM']:
+        clean_ffc_cache()
         print "Run LICM %s p%d" % (problem, poly_order)
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM')
         os.environ['PYOP2_IR_LICM'] = 'True'
@@ -244,6 +251,7 @@ for poly_order in poly_orders:
 
 
     if opt in ['ALL', 'LICM_AP']:
+        clean_ffc_cache()
         print "Run LICM+ALIGN+PADDING %s p%d" % (problem, poly_order)
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP')
         os.environ['PYOP2_IR_LICM'] = 'True'
@@ -269,6 +277,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_NOZEROS'] = 'False'
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
         for i in tile_sizes:
+            clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'TILE%d' % i)
             os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
@@ -290,6 +299,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_NOZEROS'] = 'False'
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
         for i in unroll_factors:
+            clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
@@ -313,6 +323,7 @@ for poly_order in poly_orders:
         its_size = int(math.ceil(its_size / float(vect_len))) * vect_len
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len + 1)]
         for i in unroll_factors:
+            clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECTEXT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
