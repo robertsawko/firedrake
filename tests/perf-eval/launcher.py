@@ -46,43 +46,71 @@ else:
     opt = sys.argv[1] if sys.argv[1] in opts else 'ALL'
 
 
-### SET THE PROBLEM TO EXECUTE ###
+### SET PROBLEM TO EXECUTE AND SET MESH SIZE ###
+
+mesh_size = {}
 
 if problem == 'HELMHOLTZ_2D':
     from helmholtz_2d import run_helmholtz as run_prob
     print "Running Helmholtz 2D problem"
-    mesh_size = 8
+    mesh_size[(problem, 1)] = 10
+    mesh_size[(problem, 2)] = 9
+    mesh_size[(problem, 3)] = 8
+    mesh_size[(problem, 4)] = 7
 elif problem == 'HELMHOLTZ_3D':
     from helmholtz_3d import run_helmholtz as run_prob
     print "Running Helmholtz 3D problem"
-    mesh_size = 4
+    mesh_size[(problem, 1)] = 6
+    mesh_size[(problem, 2)] = 5
+    mesh_size[(problem, 3)] = 4
+    mesh_size[(problem, 4)] = 3
 elif problem == 'MASS_2D':
     from mass_2d import run_mass as run_prob
     print "Running Mass 2D problem"
-    mesh_size = 9
+    mesh_size[(problem, 1)] = 10
+    mesh_size[(problem, 2)] = 10
+    mesh_size[(problem, 3)] = 9
+    mesh_size[(problem, 4)] = 8
 elif problem == 'MASS_3D':
     from mass_3d import run_mass as run_prob
     print "Running Mass 3D problem"
-    mesh_size = 4
+    mesh_size[(problem, 1)] = 7
+    mesh_size[(problem, 2)] = 6
+    mesh_size[(problem, 3)] = 5
+    mesh_size[(problem, 4)] = 4
 elif problem == 'BURGERS_2D':
     from burgers_2d import run_burgers as run_prob
     print "Running Burgers 2D problem"
-    mesh_size = 8
+    mesh_size[(problem, 1)] = 9
+    mesh_size[(problem, 2)] = 7
+    mesh_size[(problem, 3)] = 7
+    mesh_size[(problem, 4)] = 7
 elif problem == 'BURGERS_3D':
     from burgers_3d import run_burgers as run_prob
     print "Running Burgers 3D problem"
-    mesh_size = 5
+    mesh_size[(problem, 1)] = 6
+    mesh_size[(problem, 2)] = 5
+    mesh_size[(problem, 3)] = 4
+    mesh_size[(problem, 4)] = 3
 elif problem == 'ADVDIFF_2D':
     from adv_diff_2d import run_advdiff as run_prob
     print "Running Advection-Diffusion 2D problem"
-    mesh_size = 8
+    mesh_size[(problem, 1)] = 9
+    mesh_size[(problem, 2)] = 9
+    mesh_size[(problem, 3)] = 8
+    mesh_size[(problem, 4)] = 7
 elif problem == 'ADVDIFF_3D':
     from adv_diff_3d import run_advdiff as run_prob
     print "Running Advection-Diffusion 2D problem"
-    mesh_size = 4
-
+    mesh_size[(problem, 1)] = 5
+    mesh_size[(problem, 2)] = 5
+    mesh_size[(problem, 3)] = 4
+    mesh_size[(problem, 4)] = 3
 
 problem = problem.lower()
+
+
+### PRINT USEFUL OUTPUT INFO ###
 
 simd_isa = os.environ.get('PYOP2_SIMD_ISA')
 if not simd_isa:
@@ -140,6 +168,8 @@ for poly_order in poly_orders:
     os.environ['PYOP2_IR_VECT'] = 'None'
     os.environ['PYOP2_NOZEROS'] = 'False'
 
+    this_mesh_size = mesh_size[(problem.upper(), poly_order)]
+
     # First, find out size of iteration space with a "test" execution
     if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
         print ('Finding out size of iteration space...'),
@@ -150,33 +180,21 @@ for poly_order in poly_orders:
 
     results = []
     digest = open ("digest_%s_p%d.txt" % (problem, poly_order),"w")
-    dump_name = "code_%s_p%s.txt" % (problem, poly_order)
-    os.environ['PYOP2_PROBLEM_NAME'] = dump_name
-    print "Removing code generated in the previous run..."
-    if os.path.exists(dump_name):
-        os.remove(dump_name)
-
-    # Adjust mesh size to mitigate runtime
-    if poly_order == 1:
-        mesh_size += 1
-    if poly_order == 2:
-        mesh_size += 1
-    elif poly_order == 4:
-        mesh_size -= 1
-    elif poly_order == 5:
-        mesh_size -= 2
-
+    #print "Removing code generated in the previous run..."
+    #if os.path.exists(dump_name):
+    #    os.remove(dump_name)
 
     print "*****************************************"
 
     if opt in ['ALL', 'NORMAL']:
         print "Run NORMAL %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NORMAL')
         os.environ['PYOP2_IR_LICM'] = 'False'
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
+        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.NORMAL.dat')
         stat_parser = StringIO.StringIO()
@@ -189,12 +207,13 @@ for poly_order in poly_orders:
 
     if opt in ['ALL', 'NOZEROS']:
         print "Run NOZEROS %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NOZEROS')
         os.environ['PYOP2_IR_LICM'] = 'False'
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'True'
-        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'NOZEROS'))", 'cprof.NOZEROS.dat')
+        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NOZEROS'))", 'cprof.NOZEROS.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.NOZEROS.dat')
         stat_parser = StringIO.StringIO()
@@ -207,12 +226,13 @@ for poly_order in poly_orders:
 
     if opt in ['ALL', 'LICM']:
         print "Run LICM %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM')
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
+        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM.dat')
         stat_parser = StringIO.StringIO()
@@ -225,12 +245,13 @@ for poly_order in poly_orders:
 
     if opt in ['ALL', 'LICM_AP']:
         print "Run LICM+ALIGN+PADDING %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP')
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
+        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
         digest.write("*****************************************\n")
         p = pstats.Stats('cprof.LICM_AP.dat')
         stat_parser = StringIO.StringIO()
@@ -249,8 +270,9 @@ for poly_order in poly_orders:
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
         for i in tile_sizes:
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
+            os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'TILE%d' % i)
             os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
-            cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_TILE'))", 'cprof.LICM_AP_TILE_%d.dat' % i)
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE'))", 'cprof.LICM_AP_TILE_%d.dat' % i)
             digest.write("*****************************************\n")
             p = pstats.Stats('cprof.LICM_AP_TILE_%d.dat' % i)
             stat_parser = StringIO.StringIO()
@@ -269,8 +291,9 @@ for poly_order in poly_orders:
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
         for i in unroll_factors:
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
+            os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
-            cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_VECT'))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT'))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
             digest.write("*****************************************\n")
             p = pstats.Stats('cprof.LICM_AP_VECT_UF%d.dat' % i)
             stat_parser = StringIO.StringIO()
@@ -291,12 +314,13 @@ for poly_order in poly_orders:
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i for i in range(1, its_size/vect_len + 1)]
         for i in unroll_factors:
             print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s p%d, with unroll factor %d" % (problem, poly_order, i)
+            os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECTEXT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
             with warnings.catch_warnings(record=True) as w:
                # Cause all warnings to always be triggered.
                 warnings.simplefilter("always")
                 # Execute
-                cProfile.run("results.append((run_prob(mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
                 if not len(w):
                     digest.write("*****************************************\n")
                     p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)

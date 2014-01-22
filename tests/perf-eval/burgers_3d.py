@@ -3,10 +3,12 @@
 from firedrake import *
 
 def run_burgers(n=30, degree=1):
-    mesh = UnitCubeMesh(2**n, 2**n, 2**n)
+    mesh = UnitCubeMesh(2 ** n, 2 ** n, 2 ** n)
     V = VectorFunctionSpace(mesh, "CG", degree)
 
-    ic = project(Expression(["sin(pi*x[0])", 0, 0]), V)
+    ic = Function(V)
+    ic.interpolate(Expression([0, 0, 0]))
+    #ic.interpolate(Expression(["sin(pi*x[0])", 0, 0]))
 
     u_ = Function(ic, name="Velocity")
     u = Function(V, name="VelocityNext")
@@ -31,6 +33,7 @@ def run_burgers(n=30, degree=1):
     #while (t <= end):
         #print t
     solve(F == 0, u)
+            #, solver_parameters={'ksp_divtol': 1.0e6})
             #, solver_parameters={'snes_view': True, 'snes_converged_reason': True, 'ksp_converged_reason': True, 'snes_linesearch_monitor': True, 'snes_monitor': True, 'ksp_monitor_true_residual': True})
     #    u_.assign(u)
     #    t += timestep

@@ -28,3 +28,5 @@ def run_advdiff(n=30, degree=1):
 
     solve(M == adv_rhs, t)
     solve(D == diff_rhs, t)
+
+    return t

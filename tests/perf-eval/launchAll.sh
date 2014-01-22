@@ -8,7 +8,7 @@ fi
 
 if [ "$1" == "ALL" ]
 then
-    RUN_PROBLEMS=PROBLEMS
+    RUN_PROBLEMS=(${PROBLEMS[@]})
 else
     RUN_PROBLEMS=("$1")
 fi
