@@ -7,7 +7,7 @@ import os
 import StringIO
 import warnings
 
-opts = ['NORMAL', 'NOZEROS', 'LICM', 'LICM_AP', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
+opts = ['NORMAL', 'NOZEROS', 'LICM', 'LICM_AP', 'LICM_AP_SPLIT', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
 problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS_2D', 'BURGERS_3D', 'ADVDIFF_2D', 'ADVDIFF_3D']
 _poly_orders = [1, 2, 3, 4]
 
@@ -196,6 +196,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NORMAL')
         os.environ['PYOP2_IR_LICM'] = 'False'
         os.environ['PYOP2_IR_AP'] = 'False'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
@@ -216,6 +217,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'NOZEROS')
         os.environ['PYOP2_IR_LICM'] = 'False'
         os.environ['PYOP2_IR_AP'] = 'False'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'True'
@@ -236,6 +238,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM')
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'False'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
@@ -256,6 +259,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP')
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
@@ -270,9 +274,31 @@ for poly_order in poly_orders:
         os.remove('cprof.LICM_AP.dat')
 
 
+    if opt in ['ALL', 'LICM_AP_SPLIT']:
+        clean_ffc_cache()
+        print "Run LICM+ALIGN+PADDING+SPLIT %s p%d" % (problem, poly_order)
+        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP_SPLIT')
+        os.environ['PYOP2_IR_LICM'] = 'True'
+        os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_SPLIT'] = "(True, 4)"
+        os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_NOZEROS'] = 'False'
+        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))", 'cprof.LICM_AP_SPLIT.dat')
+        digest.write("*****************************************\n")
+        p = pstats.Stats('cprof.LICM_AP_SPLIT.dat')
+        stat_parser = StringIO.StringIO()
+        p.stream = stat_parser
+        p.sort_stats('time').print_stats('form_cell_integral_0')
+        digest.write(stat_parser.getvalue())
+        digest.write("*****************************************\n\n")
+        os.remove('cprof.LICM_AP_SPLIT.dat')
+
+
     if opt in ['ALL', 'LICM_AP_TILE']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
@@ -295,6 +321,7 @@ for poly_order in poly_orders:
     if opt in ['ALL', 'LICM_AP_VECT']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_NOZEROS'] = 'False'
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
@@ -317,6 +344,7 @@ for poly_order in poly_orders:
     if opt in ['ALL', 'LICM_AP_VECT_EXT']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_NOZEROS'] = 'False'
         import math
