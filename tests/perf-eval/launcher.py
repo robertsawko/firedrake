@@ -7,8 +7,10 @@ import os
 import StringIO
 import warnings
 
-opts = ['NORMAL', 'NOZEROS', 'LICM', 'LICM_AP', 'LICM_AP_SPLIT', 'LICM_AP_TILE', 'LICM_IR_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']
-problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'BURGERS_2D', 'BURGERS_3D', 'ADVDIFF_2D', 'ADVDIFF_3D']
+from math import log, ceil
+
+opts = ['NORMAL', 'NOZEROS', 'LICM', 'LICM_AP', 'LICM_AP_SPLIT', 'LICM_AP_TILE', 'LICM_AP_TILE_SPLIT', 'LICM_AP_VECT', 'LICM_AP_VECT_SPLIT', 'LICM_AP_VECT_EXT', 'LICM_AP_VECT_EXT_SPLIT']
+problems = ['MASS_2D', 'MASS_3D', 'HELMHOLTZ_2D', 'HELMHOLTZ_3D', 'HELMHOLTZ_XTR', 'BURGERS_2D', 'BURGERS_3D', 'BURGERS_XTR', 'ADVDIFF_2D', 'ADVDIFF_3D', 'ADVDIFF_XTR']
 _poly_orders = [1, 2, 3, 4]
 
 DEFAULT_TILE_SIZE = 20
@@ -59,6 +61,7 @@ if problem == 'HELMHOLTZ_2D':
     mesh_size[(problem, 2)] = 9
     mesh_size[(problem, 3)] = 8
     mesh_size[(problem, 4)] = 7
+    split_size = 3
 elif problem == 'HELMHOLTZ_3D':
     from helmholtz_3d import run_helmholtz as run_prob
     print "Running Helmholtz 3D problem"
@@ -66,6 +69,15 @@ elif problem == 'HELMHOLTZ_3D':
     mesh_size[(problem, 2)] = 5
     mesh_size[(problem, 3)] = 4
     mesh_size[(problem, 4)] = 3
+    split_size = 4
+elif problem == 'HELMHOLTZ_XTR':
+    from helmholtz_xtr import run_helmholtz as run_prob
+    print "Running Helmholtz XTR problem"
+    mesh_size[(problem, 1)] = 7
+    mesh_size[(problem, 2)] = 6
+    mesh_size[(problem, 3)] = 5
+    mesh_size[(problem, 4)] = 4
+    split_size = 4
 elif problem == 'MASS_2D':
     from mass_2d import run_mass as run_prob
     print "Running Mass 2D problem"
@@ -73,41 +85,63 @@ elif problem == 'MASS_2D':
     mesh_size[(problem, 2)] = 10
     mesh_size[(problem, 3)] = 9
     mesh_size[(problem, 4)] = 8
+    split_size = 1
 elif problem == 'MASS_3D':
     from mass_3d import run_mass as run_prob
     print "Running Mass 3D problem"
-    mesh_size[(problem, 1)] = 7
-    mesh_size[(problem, 2)] = 6
-    mesh_size[(problem, 3)] = 5
-    mesh_size[(problem, 4)] = 4
+    mesh_size[(problem, 1)] = 8
+    mesh_size[(problem, 2)] = 7
+    mesh_size[(problem, 3)] = 6
+    mesh_size[(problem, 4)] = 5
+    split_size = 1
 elif problem == 'BURGERS_2D':
     from burgers_2d import run_burgers as run_prob
     print "Running Burgers 2D problem"
     mesh_size[(problem, 1)] = 9
     mesh_size[(problem, 2)] = 7
     mesh_size[(problem, 3)] = 7
-    mesh_size[(problem, 4)] = 7
+    mesh_size[(problem, 4)] = 6
+    split_size = 7
 elif problem == 'BURGERS_3D':
     from burgers_3d import run_burgers as run_prob
     print "Running Burgers 3D problem"
+    mesh_size[(problem, 1)] = 4#6
+    mesh_size[(problem, 2)] = 3#5
+    mesh_size[(problem, 3)] = 2#4
+    mesh_size[(problem, 4)] = 2#3
+    split_size = 10
+elif problem == 'BURGERS_XTR':
+    from burgers_xtr import run_burgers as run_prob
+    print "Running Burgers XTR problem"
+    mesh_size[(problem, 1)] = 4#6
+    mesh_size[(problem, 2)] = 3#5
+    mesh_size[(problem, 3)] = 2#4
+    mesh_size[(problem, 4)] = 1#3
+    split_size = 10
+elif problem == 'ADVDIFF_2D':
+    from adv_diff_2d import run_advdiff as run_prob
+    print "Running Advection-Diffusion 2D problem"
+    mesh_size[(problem, 1)] = 10
+    mesh_size[(problem, 2)] = 9
+    mesh_size[(problem, 3)] = 8
+    mesh_size[(problem, 4)] = 7
+    split_size = 2
+elif problem == 'ADVDIFF_3D':
+    from adv_diff_3d import run_advdiff as run_prob
+    print "Running Advection-Diffusion 3D problem"
     mesh_size[(problem, 1)] = 6
     mesh_size[(problem, 2)] = 5
     mesh_size[(problem, 3)] = 4
     mesh_size[(problem, 4)] = 3
-elif problem == 'ADVDIFF_2D':
-    from adv_diff_2d import run_advdiff as run_prob
-    print "Running Advection-Diffusion 2D problem"
-    mesh_size[(problem, 1)] = 9
-    mesh_size[(problem, 2)] = 9
-    mesh_size[(problem, 3)] = 8
-    mesh_size[(problem, 4)] = 7
-elif problem == 'ADVDIFF_3D':
-    from adv_diff_3d import run_advdiff as run_prob
-    print "Running Advection-Diffusion 2D problem"
-    mesh_size[(problem, 1)] = 5
+    split_size = 3
+elif problem == 'ADVDIFF_XTR':
+    from adv_diff_xtr import run_advdiff as run_prob
+    print "Running Advection-Diffusion XTR problem"
+    mesh_size[(problem, 1)] = 7
     mesh_size[(problem, 2)] = 5
     mesh_size[(problem, 3)] = 4
     mesh_size[(problem, 4)] = 3
+    split_size = 3
 
 problem = problem.lower()
 
@@ -155,8 +189,8 @@ def clean_ffc_cache():
 
 clean_ffc_cache()
 
-os.popen('mkdir -p dump_code_%s' % problem)
-os.popen('mkdir -p results_%s' % problem)
+os.popen('mkdir -p /data/FIREDRAKE-RESULTS/dump_code_%s' % problem)
+os.popen('mkdir -p /data/FIREDRAKE-RESULTS/results_%s' % problem)
 
 if poly_order:
     poly_orders = [poly_order]
@@ -168,6 +202,7 @@ for poly_order in poly_orders:
     # Init environment
     os.environ['PYOP2_IR_LICM'] = 'False'
     os.environ['PYOP2_IR_AP'] = 'False'
+    os.environ['PYOP2_IR_SPLIT'] = 'False'
     os.environ['PYOP2_IR_TILE'] = 'False'
     os.environ['PYOP2_IR_VECT'] = 'None'
     os.environ['PYOP2_NOZEROS'] = 'False'
@@ -175,18 +210,22 @@ for poly_order in poly_orders:
     this_mesh_size = mesh_size[(problem.upper(), poly_order)]
 
     # First, find out size of iteration space with a "test" execution
-    if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_VECT', 'LICM_AP_VECT_EXT']:
+    if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_TILE_SPLIT', 'LICM_AP_VECT', 'LICM_AP_VECT_SPLIT', 'LICM_AP_VECT_EXT', 'LICM_AP_VECT_EXT_SPLIT']:
+        clean_ffc_cache()
         print ('Finding out size of iteration space...'),
         os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
         run_prob(this_mesh_size, poly_order)
         its_size = int(os.environ['PYOP2_PROBLEM_SIZE'])
         print "Found! %d X %d" % (its_size, its_size)
 
+    # Set and print the expression split factors
+    #split_cuts = [int(ceil(float(split_size)/(2**(i+1)))) for i in range(int(log(split_size, 2)))]
+    split_cuts = [i+1 for i in range(split_size)]
+    print "For problem %s the max expression length is %d. Cuts = %s" % (problem, split_size, split_cuts)
+
+
     results = []
-    digest = open ("digest_%s_p%d.txt" % (problem, poly_order),"w")
-    #print "Removing code generated in the previous run..."
-    #if os.path.exists(dump_name):
-    #    os.remove(dump_name)
+    digest = open ("digest_%s_p%d_%s.txt" % (problem, poly_order, opt),"w")
 
     print "*****************************************"
 
@@ -275,24 +314,25 @@ for poly_order in poly_orders:
 
 
     if opt in ['ALL', 'LICM_AP_SPLIT']:
-        clean_ffc_cache()
-        print "Run LICM+ALIGN+PADDING+SPLIT %s p%d" % (problem, poly_order)
-        os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP_SPLIT')
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
-        os.environ['PYOP2_IR_SPLIT'] = "(True, 4)"
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))", 'cprof.LICM_AP_SPLIT.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM_AP_SPLIT.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM_AP_SPLIT.dat')
+        for i in split_cuts:
+            clean_ffc_cache()
+            print "Run LICM+ALIGN+PADDING+SPLIT %s p%d, with cut size %d" % (problem, poly_order, i)
+            os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP_SPLIT%d' % i)
+            os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (i, split_size)
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))", 'cprof.LICM_AP_SPLIT_%d.dat' % i)
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.LICM_AP_SPLIT_%d.dat' % i)
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.LICM_AP_SPLIT_%d.dat' % i)
 
 
     if opt in ['ALL', 'LICM_AP_TILE']:
@@ -301,7 +341,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
-        tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len)]
+        tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len) if vect_len*i <= 24]
         for i in tile_sizes:
             clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
@@ -318,13 +358,37 @@ for poly_order in poly_orders:
             os.remove('cprof.LICM_AP_TILE_%d.dat' % i)
 
 
+    if opt in ['LICM_AP_TILE_SPLIT']:
+        os.environ['PYOP2_IR_LICM'] = 'True'
+        os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_NOZEROS'] = 'False'
+        tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len) if vect_len*i <= 24]
+        for i in tile_sizes:
+            os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
+            for j in split_cuts:
+                clean_ffc_cache()
+                os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'TILE%d_SPLIT%d' % (i, j))
+                os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (j, split_size)
+                print "Run LICM+ALIGN+PADDING+TILING+SPLITT %s p%d, with tile size %d, split cut %d" % (problem, poly_order, i, j)
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE_SPLIT'))", 'cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                digest.write("*****************************************\n")
+                p = pstats.Stats('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                stat_parser = StringIO.StringIO()
+                p.stream = stat_parser
+                p.sort_stats('time').print_stats('form_cell_integral_0')
+                digest.write(stat_parser.getvalue())
+                digest.write("*****************************************\n\n")
+                os.remove('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+
+
     if opt in ['ALL', 'LICM_AP_VECT']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len)]
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len) if i<5]
         for i in unroll_factors:
             clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
@@ -341,7 +405,31 @@ for poly_order in poly_orders:
             os.remove('cprof.LICM_AP_VECT_UF%d.dat' % i)
 
 
-    if opt in ['ALL', 'LICM_AP_VECT_EXT']:
+    if opt in ['LICM_AP_VECT_SPLIT']:
+        os.environ['PYOP2_IR_LICM'] = 'True'
+        os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_NOZEROS'] = 'False'
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len) if i<5]
+        for i in unroll_factors:
+            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
+            for j in split_cuts:
+                clean_ffc_cache()
+                os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d_SPLIT%d' % (i, j))
+                os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (j, split_size)
+                print "Run LICM+ALIGN+PADDING+VEC+SPLITT %s p%d, with unroll factor %d, split cut %d" % (problem, poly_order, i, j)
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_SPLIT'))", 'cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                digest.write("*****************************************\n")
+                p = pstats.Stats('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                stat_parser = StringIO.StringIO()
+                p.stream = stat_parser
+                p.sort_stats('time').print_stats('form_cell_integral_0')
+                digest.write(stat_parser.getvalue())
+                digest.write("*****************************************\n\n")
+                os.remove('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+
+
+    if opt in ['LICM_AP_VECT_EXT']: #['ALL', 'LICM_AP_VECT_EXT']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_SPLIT'] = 'False'
@@ -356,7 +444,7 @@ for poly_order in poly_orders:
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECTEXT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
             with warnings.catch_warnings(record=True) as w:
-               # Cause all warnings to always be triggered.
+                # Cause all warnings to always be triggered.
                 warnings.simplefilter("always")
                 # Execute
                 cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
@@ -373,15 +461,56 @@ for poly_order in poly_orders:
                     print "... Discarding result"
                 os.remove('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
 
+
+    if opt in ['LICM_AP_VECT_EXT_SPLIT']:
+        os.environ['PYOP2_IR_LICM'] = 'True'
+        os.environ['PYOP2_IR_AP'] = 'True'
+        os.environ['PYOP2_IR_TILE'] = 'False'
+        os.environ['PYOP2_NOZEROS'] = 'False'
+        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len + 1) if i<5]
+        for i in unroll_factors:
+            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
+            for j in split_cuts:
+                clean_ffc_cache()
+                os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'EXTVECT%d_SPLIT%d' % (i, j))
+                os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (j, split_size)
+                print "Run LICM+ALIGN+PADDING+VEC+EXTRA+SPLITT %s p%d, with unroll factor %d, split cut %d" % (problem, poly_order, i, j)
+                with warnings.catch_warnings(record=True) as w:
+                    # Cause all warnings to always be triggered.
+                    warnings.simplefilter("always")
+                    # Execute
+                    cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT_SPLIT'))", 'cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+                    if not len(w):
+                        digest.write("*****************************************\n")
+                        p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+                        stat_parser = StringIO.StringIO()
+                        p.stream = stat_parser
+                        p.sort_stats('time').print_stats('form_cell_integral_0')
+                        digest.write(stat_parser.getvalue())
+                        digest.write("*****************************************\n\n")
+                    else:
+                        print (w[0].message),
+                        print "... Discarding result"
+                    os.remove('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+
+
+
     import numpy
     print "Checking the correctness of results...",
     found_one_error = False
+    #from IPython import embed; embed()
     for r, name in results:
         if not numpy.allclose(results[0][0].dat.data, r.dat.data):
             warnings.warn("Warning: %s test case result differs from %s." % (name, results[0][1]))
             found_one_error = True
     if not found_one_error:
         print "OK! Results match."
+    else:
+        print "Results do NOT match."
 
-os.popen('mv code_* dump_code_%s' % problem)
-os.popen('mv digest_* results_%s' % problem)
+    digest.close()
+
+os.popen('mv code_* /data/FIREDRAKE-RESULTS/dump_code_%s' % problem)
+os.popen('mv digest_* /data/FIREDRAKE-RESULTS/results_%s' % problem)
+
+print "****************FINISHED*****************"

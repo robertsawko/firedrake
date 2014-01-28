@@ -18,5 +18,6 @@ do
     for i in 1 2 3 4
     do
         python launcher.py ALL $p $i
+        python launcher.py LICM_AP_VECT_SPLIT $p $i
     done
 done
