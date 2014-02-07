@@ -19,16 +19,21 @@ DEFAULT_UNROLL_FACTOR = 1
 
 ### PARSE CMD LINE ARGUMENTS ###
 
-if len(sys.argv) not in [3, 4]:
-    print "Usage: opt problem poly [--singlerun]"
+if len(sys.argv) not in [3, 4, 5]:
+    print "Usage: opt problem poly [--singlerun] [--time-kernel]"
     sys.exit(0)
 
-if len(sys.argv) == 4 and sys.argv[3] == "--singlerun":
+if len(sys.argv) in [4, 5] and sys.argv[3] == "--singlerun":
     its_size = False
     print "Executing a single run with polynomial order 1"
     sys.argv[3] = '1'
 else:
     its_size = True
+
+if len(sys.argv) == 5 and sys.argv[4] == "--time-kernel":
+    time_kernel = True
+else:
+    time_kernel = False
 
 if not sys.argv[3].isdigit():
     print "Polynomial order must be an integer. Exiting..."
@@ -189,6 +194,10 @@ def clean_ffc_cache():
 
 clean_ffc_cache()
 
+import subprocess
+subprocess.call(['instant-clean'])
+print "Instant cache cleaned!"
+
 os.popen('mkdir -p /data/FIREDRAKE-RESULTS/dump_code_%s' % problem)
 os.popen('mkdir -p /data/FIREDRAKE-RESULTS/results_%s' % problem)
 
@@ -210,7 +219,7 @@ for poly_order in poly_orders:
     this_mesh_size = mesh_size[(problem.upper(), poly_order)]
 
     # First, find out size of iteration space with a "test" execution
-    if its_size and opt in ['ALL', 'LICM_AP_TILE', 'LICM_AP_TILE_SPLIT', 'LICM_AP_VECT', 'LICM_AP_VECT_SPLIT', 'LICM_AP_VECT_EXT', 'LICM_AP_VECT_EXT_SPLIT']:
+    if its_size and opt in ['LICM_AP_TILE', 'LICM_AP_TILE_SPLIT', 'LICM_AP_VECT', 'LICM_AP_VECT_SPLIT', 'LICM_AP_VECT_EXT', 'LICM_AP_VECT_EXT_SPLIT']:
         clean_ffc_cache()
         print ('Finding out size of iteration space...'),
         os.environ['PYOP2_PROBLEM_NAME'] = 'TEST_RUN'
@@ -219,15 +228,17 @@ for poly_order in poly_orders:
         print "Found! %d X %d" % (its_size, its_size)
 
     # Set and print the expression split factors
-    #split_cuts = [int(ceil(float(split_size)/(2**(i+1)))) for i in range(int(log(split_size, 2)))]
-    split_cuts = [i+1 for i in range(split_size)]
+    split_cuts = [i+1 for i in range(split_size-1)]
     print "For problem %s the max expression length is %d. Cuts = %s" % (problem, split_size, split_cuts)
 
 
     results = []
-    digest = open ("digest_%s_p%d_%s.txt" % (problem, poly_order, opt),"w")
-
-    print "*****************************************"
+    filename = "digest_%s_p%d_%s.txt" % (problem, poly_order, opt)
+    digest = open (filename,"w")
+    digest.write("*****************************************\n")
+    digest.close()
+    if time_kernel:
+        os.environ['PYOP2_TIME_KERNEL'] = filename
 
     if opt in ['ALL', 'NORMAL']:
         clean_ffc_cache()
@@ -239,16 +250,27 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.NORMAL.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.NORMAL.dat')
+        if time_kernel:
+            results.append((run_prob(this_mesh_size, poly_order), 'NORMAL'))
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            digest.close()
+        else:
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NORMAL'))", 'cprof.NORMAL.dat')
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.NORMAL.dat')
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.NORMAL.dat')
+            digest.close()
 
+    if opt == 'ALL':
+        its_size = int(os.environ['PYOP2_PROBLEM_SIZE'])
+        print "Found size of iteration space: %d X %d" % (its_size, its_size)
 
     if opt in ['ALL', 'NOZEROS']:
         clean_ffc_cache()
@@ -260,15 +282,23 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'True'
-        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NOZEROS'))", 'cprof.NOZEROS.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.NOZEROS.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.NOZEROS.dat')
+        if time_kernel:
+            results.append((run_prob(this_mesh_size, poly_order), 'NOZEROS'))
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            digest.close()
+        else:
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'NOZEROS'))", 'cprof.NOZEROS.dat')
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.NOZEROS.dat')
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.NOZEROS.dat')
+            digest.close()
 
 
     if opt in ['ALL', 'LICM']:
@@ -281,15 +311,23 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = 'None'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM.dat')
+        if time_kernel:
+            results.append((run_prob(this_mesh_size, poly_order), 'LICM'))
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            digest.close()
+        else:
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM'))", 'cprof.LICM.dat')
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.LICM.dat')
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.LICM.dat')
+            digest.close()
 
 
     if opt in ['ALL', 'LICM_AP']:
@@ -302,15 +340,23 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
-        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
-        digest.write("*****************************************\n")
-        p = pstats.Stats('cprof.LICM_AP.dat')
-        stat_parser = StringIO.StringIO()
-        p.stream = stat_parser
-        p.sort_stats('time').print_stats('form_cell_integral_0')
-        digest.write(stat_parser.getvalue())
-        digest.write("*****************************************\n\n")
-        os.remove('cprof.LICM_AP.dat')
+        if time_kernel:
+            results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP'))
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            digest.close()
+        else:
+            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP'))", 'cprof.LICM_AP.dat')
+            digest = open (filename,"a")
+            digest.write("*****************************************\n")
+            p = pstats.Stats('cprof.LICM_AP.dat')
+            stat_parser = StringIO.StringIO()
+            p.stream = stat_parser
+            p.sort_stats('time').print_stats('form_cell_integral_0')
+            digest.write(stat_parser.getvalue())
+            digest.write("*****************************************\n\n")
+            os.remove('cprof.LICM_AP.dat')
+            digest.close()
 
 
     if opt in ['ALL', 'LICM_AP_SPLIT']:
@@ -324,15 +370,23 @@ for poly_order in poly_orders:
             print "Run LICM+ALIGN+PADDING+SPLIT %s p%d, with cut size %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'LICM_AP_SPLIT%d' % i)
             os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (i, split_size)
-            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))", 'cprof.LICM_AP_SPLIT_%d.dat' % i)
-            digest.write("*****************************************\n")
-            p = pstats.Stats('cprof.LICM_AP_SPLIT_%d.dat' % i)
-            stat_parser = StringIO.StringIO()
-            p.stream = stat_parser
-            p.sort_stats('time').print_stats('form_cell_integral_0')
-            digest.write(stat_parser.getvalue())
-            digest.write("*****************************************\n\n")
-            os.remove('cprof.LICM_AP_SPLIT_%d.dat' % i)
+            if time_kernel:
+                results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                digest.close()
+            else:
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_SPLIT'))", 'cprof.LICM_AP_SPLIT_%d.dat' % i)
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                p = pstats.Stats('cprof.LICM_AP_SPLIT_%d.dat' % i)
+                stat_parser = StringIO.StringIO()
+                p.stream = stat_parser
+                p.sort_stats('time').print_stats('form_cell_integral_0')
+                digest.write(stat_parser.getvalue())
+                digest.write("*****************************************\n\n")
+                os.remove('cprof.LICM_AP_SPLIT_%d.dat' % i)
+                digest.close()
 
 
     if opt in ['ALL', 'LICM_AP_TILE']:
@@ -347,15 +401,23 @@ for poly_order in poly_orders:
             print "Run LICM+ALIGN+PADDING+TILING %s p%d, with tile size %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'TILE%d' % i)
             os.environ['PYOP2_IR_TILE'] = '(True, %d)' % i
-            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE'))", 'cprof.LICM_AP_TILE_%d.dat' % i)
-            digest.write("*****************************************\n")
-            p = pstats.Stats('cprof.LICM_AP_TILE_%d.dat' % i)
-            stat_parser = StringIO.StringIO()
-            p.stream = stat_parser
-            p.sort_stats('time').print_stats('form_cell_integral_0')
-            digest.write(stat_parser.getvalue())
-            digest.write("*****************************************\n\n")
-            os.remove('cprof.LICM_AP_TILE_%d.dat' % i)
+            if time_kernel:
+                results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE'))
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                digest.close()
+            else:
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE'))", 'cprof.LICM_AP_TILE_%d.dat' % i)
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                p = pstats.Stats('cprof.LICM_AP_TILE_%d.dat' % i)
+                stat_parser = StringIO.StringIO()
+                p.stream = stat_parser
+                p.sort_stats('time').print_stats('form_cell_integral_0')
+                digest.write(stat_parser.getvalue())
+                digest.write("*****************************************\n\n")
+                os.remove('cprof.LICM_AP_TILE_%d.dat' % i)
+                digest.close()
 
 
     if opt in ['LICM_AP_TILE_SPLIT']:
@@ -371,15 +433,23 @@ for poly_order in poly_orders:
                 os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'TILE%d_SPLIT%d' % (i, j))
                 os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (j, split_size)
                 print "Run LICM+ALIGN+PADDING+TILING+SPLITT %s p%d, with tile size %d, split cut %d" % (problem, poly_order, i, j)
-                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE_SPLIT'))", 'cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
-                digest.write("*****************************************\n")
-                p = pstats.Stats('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
-                stat_parser = StringIO.StringIO()
-                p.stream = stat_parser
-                p.sort_stats('time').print_stats('form_cell_integral_0')
-                digest.write(stat_parser.getvalue())
-                digest.write("*****************************************\n\n")
-                os.remove('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                if time_kernel:
+                    results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE_SPLIT'))
+                    digest = open (filename,"a")
+                    digest.write("*****************************************\n")
+                    digest.close()
+                else:
+                    cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_TILE_SPLIT'))", 'cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                    digest = open (filename,"a")
+                    digest.write("*****************************************\n")
+                    p = pstats.Stats('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                    stat_parser = StringIO.StringIO()
+                    p.stream = stat_parser
+                    p.sort_stats('time').print_stats('form_cell_integral_0')
+                    digest.write(stat_parser.getvalue())
+                    digest.write("*****************************************\n\n")
+                    os.remove('cprof.LICM_AP_TILE%d_SPLIT%d.dat' % (i, j))
+                    digest.close()
 
 
     if opt in ['ALL', 'LICM_AP_VECT']:
@@ -394,15 +464,23 @@ for poly_order in poly_orders:
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d' % i)
             os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
-            cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT'))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
-            digest.write("*****************************************\n")
-            p = pstats.Stats('cprof.LICM_AP_VECT_UF%d.dat' % i)
-            stat_parser = StringIO.StringIO()
-            p.stream = stat_parser
-            p.sort_stats('time').print_stats('form_cell_integral_0')
-            digest.write(stat_parser.getvalue())
-            digest.write("*****************************************\n\n")
-            os.remove('cprof.LICM_AP_VECT_UF%d.dat' % i)
+            if time_kernel:
+                results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT'))
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                digest.close()
+            else:
+                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT'))", 'cprof.LICM_AP_VECT_UF%d.dat' % i)
+                digest = open (filename,"a")
+                digest.write("*****************************************\n")
+                p = pstats.Stats('cprof.LICM_AP_VECT_UF%d.dat' % i)
+                stat_parser = StringIO.StringIO()
+                p.stream = stat_parser
+                p.sort_stats('time').print_stats('form_cell_integral_0')
+                digest.write(stat_parser.getvalue())
+                digest.write("*****************************************\n\n")
+                os.remove('cprof.LICM_AP_VECT_UF%d.dat' % i)
+                digest.close()
 
 
     if opt in ['LICM_AP_VECT_SPLIT']:
@@ -418,15 +496,23 @@ for poly_order in poly_orders:
                 os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d_SPLIT%d' % (i, j))
                 os.environ['PYOP2_IR_SPLIT'] = "(True, (%d, %d))" % (j, split_size)
                 print "Run LICM+ALIGN+PADDING+VEC+SPLITT %s p%d, with unroll factor %d, split cut %d" % (problem, poly_order, i, j)
-                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_SPLIT'))", 'cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
-                digest.write("*****************************************\n")
-                p = pstats.Stats('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
-                stat_parser = StringIO.StringIO()
-                p.stream = stat_parser
-                p.sort_stats('time').print_stats('form_cell_integral_0')
-                digest.write(stat_parser.getvalue())
-                digest.write("*****************************************\n\n")
-                os.remove('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                if time_kernel:
+                    results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_SPLIT'))
+                    digest = open (filename,"a")
+                    digest.write("*****************************************\n")
+                    digest.close()
+                else:
+                    cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_SPLIT'))", 'cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                    digest = open (filename,"a")
+                    digest.write("*****************************************\n")
+                    p = pstats.Stats('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                    stat_parser = StringIO.StringIO()
+                    p.stream = stat_parser
+                    p.sort_stats('time').print_stats('form_cell_integral_0')
+                    digest.write(stat_parser.getvalue())
+                    digest.write("*****************************************\n\n")
+                    os.remove('cprof.LICM_AP_VECT_UF%d_SPLIT%d.dat' % (i, j))
+                    digest.close()
 
 
     if opt in ['LICM_AP_VECT_EXT']: #['ALL', 'LICM_AP_VECT_EXT']:
@@ -447,19 +533,27 @@ for poly_order in poly_orders:
                 # Cause all warnings to always be triggered.
                 warnings.simplefilter("always")
                 # Execute
-                cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
-                if not len(w):
+                if time_kernel:
+                    results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT'))
+                    digest = open (filename,"a")
                     digest.write("*****************************************\n")
-                    p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
-                    stat_parser = StringIO.StringIO()
-                    p.stream = stat_parser
-                    p.sort_stats('time').print_stats('form_cell_integral_0')
-                    digest.write(stat_parser.getvalue())
-                    digest.write("*****************************************\n\n")
+                    digest.close()
                 else:
-                    print (w[0].message),
-                    print "... Discarding result"
-                os.remove('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                    cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT'))", 'cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                    if not len(w):
+                        digest = open (filename,"a")
+                        digest.write("*****************************************\n")
+                        p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
+                        stat_parser = StringIO.StringIO()
+                        p.stream = stat_parser
+                        p.sort_stats('time').print_stats('form_cell_integral_0')
+                        digest.write(stat_parser.getvalue())
+                        digest.write("*****************************************\n\n")
+                        digest.close()
+                    else:
+                        print (w[0].message),
+                        print "... Discarding result"
+                    os.remove('cprof.LICM_AP_VECT_EXT_UF%d.dat' % i)
 
 
     if opt in ['LICM_AP_VECT_EXT_SPLIT']:
@@ -479,19 +573,27 @@ for poly_order in poly_orders:
                     # Cause all warnings to always be triggered.
                     warnings.simplefilter("always")
                     # Execute
-                    cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT_SPLIT'))", 'cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
-                    if not len(w):
+                    if time_kernel:
+                        results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT_SPLIT'))
+                        digest = open (filename,"a")
                         digest.write("*****************************************\n")
-                        p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
-                        stat_parser = StringIO.StringIO()
-                        p.stream = stat_parser
-                        p.sort_stats('time').print_stats('form_cell_integral_0')
-                        digest.write(stat_parser.getvalue())
-                        digest.write("*****************************************\n\n")
+                        digest.close()
                     else:
-                        print (w[0].message),
-                        print "... Discarding result"
-                    os.remove('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+                        cProfile.run("results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT_EXT_SPLIT'))", 'cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+                        if not len(w):
+                            digest = open (filename,"a")
+                            digest.write("*****************************************\n")
+                            p = pstats.Stats('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
+                            stat_parser = StringIO.StringIO()
+                            p.stream = stat_parser
+                            p.sort_stats('time').print_stats('form_cell_integral_0')
+                            digest.write(stat_parser.getvalue())
+                            digest.write("*****************************************\n\n")
+                            digest.close()
+                        else:
+                            print (w[0].message),
+                            print "... Discarding result"
+                        os.remove('cprof.LICM_AP_VECT_EXT_UF%d_SPLIT%d.dat' % (i, j))
 
 
 
@@ -508,7 +610,6 @@ for poly_order in poly_orders:
     else:
         print "Results do NOT match."
 
-    digest.close()
 
 os.popen('mv code_* /data/FIREDRAKE-RESULTS/dump_code_%s' % problem)
 os.popen('mv digest_* /data/FIREDRAKE-RESULTS/results_%s' % problem)
