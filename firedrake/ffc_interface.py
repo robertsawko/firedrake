@@ -15,6 +15,7 @@ from ufl_expr import Argument
 from ffc import default_parameters, compile_form as ffc_compile_form
 from ffc import constants
 from ffc import log
+from ffc.log import set_level, ERROR
 
 from pyop2.caching import DiskCached
 from pyop2.op2 import Kernel
@@ -35,6 +36,8 @@ if MPI.comm.rank != 0:
     log.set_level(log.ERROR)
 del log
 
+# Silence FFC
+set_level(ERROR)
 
 def _check_version():
     from version import __compatible_ffc_version_info__ as compatible_version, \
@@ -143,22 +146,24 @@ class FFCKernel(DiskCached):
                    constants.PYOP2_VERSION).hexdigest()
 
     def __init__(self, form, name):
-        if self._initialized:
-            return
+        #if self._initialized:
+        #    return
 
         incl = PreprocessNode('#include "firedrake_geometry.h"\n')
         inc = [path.dirname(__file__)]
         ffc_tree = ffc_compile_form(form, prefix=name, parameters=ffc_parameters)
 
+        import os
+        from ast import literal_eval as _eval
         kernels = []
         for it, kernel in zip(form.form_data().preprocessed_form.integrals(), ffc_tree):
             # Set optimization options
             opts = {} if it.domain_type() not in ['cell'] else \
-                   {'licm': False,
-                    'tile': None,
-                    'vect': None,
-                    'ap': False,
-                    'split': None}
+                   {'licm': _eval(os.environ.get('PYOP2_IR_LICM') or 'False'),
+                    'tile': _eval(os.environ.get('PYOP2_IR_TILE') or 'None'),
+                    'vect': _eval(os.environ.get('PYOP2_IR_VECT') or 'None'),
+                    'ap': _eval(os.environ.get('PYOP2_IR_AP') or 'False'),
+                    'split': _eval(os.environ.get('PYOP2_IR_SPLIT') or 'False')}
             kernels.append(Kernel(Root([incl, kernel]), '%s_%s_integral_0_%s' %
                            (name, it.domain_type(), it.domain_id()), opts, inc))
         self.kernels = tuple(kernels)

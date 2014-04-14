@@ -180,7 +180,7 @@ else:
 ### TO CLEAN THE FFC CACHE ###
 
 def clean_ffc_cache():
-    folder = "/tmp/pyop2-ffc-kernel-cache-uid665"
+    folder = "/tmp/firedrake-ffc-kernel-cache-uid665/"
     for the_file in os.listdir(folder):
         file_path = os.path.join(folder, the_file)
         try:
@@ -338,7 +338,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_IR_VECT'] = '(%s, 4)' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
         if time_kernel:
             results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP'))
@@ -363,7 +363,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_TILE'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 4), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_IR_VECT'] = '(%s, 4)' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
         for i in split_cuts:
             clean_ffc_cache()
@@ -393,7 +393,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
         os.environ['PYOP2_IR_SPLIT'] = 'False'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_IR_VECT'] = '(%s, 3)' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len) if vect_len*i <= 24]
         for i in tile_sizes:
@@ -423,7 +423,7 @@ for poly_order in poly_orders:
     if opt in ['LICM_AP_TILE_SPLIT']:
         os.environ['PYOP2_IR_LICM'] = 'True'
         os.environ['PYOP2_IR_AP'] = 'True'
-        os.environ['PYOP2_IR_VECT'] = '((%s, 3), "avx", "intel")' % ap.AUTOVECT
+        os.environ['PYOP2_IR_VECT'] = '(%s, 3)' % ap.AUTOVECT
         os.environ['PYOP2_NOZEROS'] = 'False'
         tile_sizes = [DEFAULT_TILE_SIZE] if not its_size else [vect_len*i for i in range(2, its_size/vect_len) if vect_len*i <= 24]
         for i in tile_sizes:
@@ -458,12 +458,12 @@ for poly_order in poly_orders:
         os.environ['PYOP2_IR_SPLIT'] = 'False'
         os.environ['PYOP2_IR_TILE'] = 'False'
         os.environ['PYOP2_NOZEROS'] = 'False'
-        unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len) if i<5]
+        unroll_factors = [3] #[DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len) if i<5]
         for i in unroll_factors:
             clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+VECT %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d' % i)
-            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
+            os.environ['PYOP2_IR_VECT'] = '(%s, %d)' % (ap.V_OP_UAJ, i)
             if time_kernel:
                 results.append((run_prob(this_mesh_size, poly_order), 'LICM_AP_VECT'))
                 digest = open (filename,"a")
@@ -490,7 +490,7 @@ for poly_order in poly_orders:
         os.environ['PYOP2_NOZEROS'] = 'False'
         unroll_factors = [DEFAULT_UNROLL_FACTOR] if not its_size else [i+1 for i in range(0, its_size/vect_len) if i<5]
         for i in unroll_factors:
-            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ, i)
+            os.environ['PYOP2_IR_VECT'] = '(%s, %d)' % (ap.V_OP_UAJ, i)
             for j in split_cuts:
                 clean_ffc_cache()
                 os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECT%d_SPLIT%d' % (i, j))
@@ -528,7 +528,7 @@ for poly_order in poly_orders:
             clean_ffc_cache()
             print "Run LICM+ALIGN+PADDING+VECT+EXTRA %s p%d, with unroll factor %d" % (problem, poly_order, i)
             os.environ['PYOP2_PROBLEM_NAME'] = "code_%s_p%s_%s.txt" % (problem, poly_order, 'VECTEXT%d' % i)
-            os.environ['PYOP2_IR_VECT'] = '((%s, %d), "avx", "intel")' % (ap.V_OP_UAJ_EXTRA, i)
+            os.environ['PYOP2_IR_VECT'] = '(%s, %d)' % (ap.V_OP_UAJ_EXTRA, i)
             with warnings.catch_warnings(record=True) as w:
                 # Cause all warnings to always be triggered.
                 warnings.simplefilter("always")

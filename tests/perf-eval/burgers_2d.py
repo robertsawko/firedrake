@@ -21,6 +21,9 @@ def run_burgers(n=30, degree=1):
 
     F = (inner((u - u_)/timestep, v)
          + inner(u, dot(grad(u), v)) + nu*inner(grad(u), grad(v)))*dx
+
+    solve(F == 0, u)
+
     #bc = DirichletBC(V, [0.0, 0.0], 1)
 
     #outfile = File("burgers.pvd")
@@ -30,7 +33,7 @@ def run_burgers(n=30, degree=1):
     #end = 0.2
     #while (t <= end):
         #print t
-    solve(F == 0, u)
+        #solve(F == 0, u)
         #u_.assign(u)
         #t += timestep
         #outfile << 0
