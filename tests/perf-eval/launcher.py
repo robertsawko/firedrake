@@ -194,9 +194,9 @@ def clean_ffc_cache():
 
 clean_ffc_cache()
 
-import subprocess
-subprocess.call(['instant-clean'])
-print "Instant cache cleaned!"
+#import subprocess
+#subprocess.call(['instant-clean'])
+#print "Instant cache cleaned!"
 
 os.popen('mkdir -p /data/FIREDRAKE-RESULTS/dump_code_%s' % problem)
 os.popen('mkdir -p /data/FIREDRAKE-RESULTS/results_%s' % problem)
