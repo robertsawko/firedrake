@@ -41,11 +41,11 @@ def test_hybridisation(degree):
     DG = FunctionSpace(mesh, "DG", degree-1)
     TraceRT = FunctionSpace(mesh, TraceElement(RT_elt))
 
-    W = MixedFunctionSpace([BrokenRT, DG, TraceRT])
+    W = MixedFunctionSpace([BrokenRT, TraceRT])
 
     # Define trial and test functions
-    sigma, u, lambdar = TrialFunctions(W)
-    tau, v, gammar = TestFunctions(W)
+    sigma, lambdar = TrialFunctions(W)
+    tau, gammar = TestFunctions(W)
 
     # Mesh normal
     n = FacetNormal(mesh)
@@ -54,19 +54,35 @@ def test_hybridisation(degree):
     f = Function(DG)
     f.interpolate(Expression("(1+8*pi*pi)*sin(x[0]*pi*2)*sin(x[1]*pi*2)"))
 
+    #Eliminate u from the equation analytically
+    #u = -div(sigma) + f
+
     # Define variational form
-    a_dx = (dot(tau, sigma) - div(tau)*u + v*u + v*div(sigma))*dx
+    a_dx = (dot(tau, sigma) + div(tau)*div(sigma))*dx
     a_dS = (jump(tau, n=n)*lambdar('+') + gammar('+')*jump(sigma, n=n))*dS
     a = a_dx + a_dS
-    L = f*v*dx
+    L = div(tau)*f*dx
 
-    bcs = DirichletBC(W.sub(2), Constant(0), (1, 2, 3, 4))
+    #build inverse for hybridised solver
+    sigma = TrialFunction(BrokenRT)
+    tau = TestFunction(BrokenRT)
+    DG_inv = assemble(inner(sigma,tau)*dx,inverse=True)
+
+    bcs = DirichletBC(W.sub(1), Constant(0), (1, 2, 3, 4))
     # Compute solution
     w = Function(W)
     solve(a == L, w, solver_parameters={'ksp_rtol': 1e-14,
-                                        'ksp_max_it': 30000},
+                                        'ksp_max_it': 300000},
           bcs=bcs)
-    Hsigma, Hu, Hlambdar = w.split()
+    Hsigma, Hlambdar = w.split()
+
+    #reconstruct Hu
+    u = TrialFunction(DG)
+    v = TestFunction(DG)
+    Hu_rhs = v*(-div(Hsigma) + f)*dx
+    a_Hu = u*v*dx
+    Hu = Function(DG)
+    solve(a_Hu==Hu_rhs, Hu)
 
     # Compare result to non-hybridised calculation
     RT = FunctionSpace(mesh, "RT", degree)
@@ -86,7 +102,6 @@ def test_hybridisation(degree):
 
     assert uerr < 1e-11
     assert sigerr < 4e-11
-
 
 if __name__ == '__main__':
     import os
