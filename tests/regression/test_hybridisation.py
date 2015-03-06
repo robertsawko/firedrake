@@ -28,6 +28,11 @@ sin(x[0]*pi*2)*sin(x[1]*pi*2)
 import pytest
 from firedrake import *
 
+class APC(object):
+    def __init__(self, A_inv):
+        self.A_inv = A_inv
+        def apply(self, pc, x, y):
+            self.A_inv.M.handle.mult(x,y)
 
 @pytest.mark.parametrize('degree', range(1, 3))
 def test_hybridisation(degree):
@@ -69,11 +74,36 @@ def test_hybridisation(degree):
     DG_inv = assemble(inner(sigma,tau)*dx,inverse=True)
 
     bcs = DirichletBC(W.sub(1), Constant(0), (1, 2, 3, 4))
+
+    #Build a schur complement S
+    aMat = assemble(a, bcs=bcs)
+    B = aMat.M[0,1].handle
+    C = aMat.M[1, 0].handle
+    D = aMat.M[1, 1].handle
+    
+    tmp = DG_inv.M.handle.matMult(B)
+    tmp = C.matMult(tmp)
+    S = D.copy()
+    S.axpy(-1, tmp)
+
     # Compute solution
     w = Function(W)
-    solve(a == L, w, solver_parameters={'ksp_rtol': 1e-14,
-                                        'ksp_max_it': 300000},
-          bcs=bcs)
+    prob = LinearVariationalProblem(a,L,w,bcs=bcs)
+    solver = LinearVariationalSolver(prob,
+                                     solver_parameters={'ksp_rtol': 1e-14,
+                                                        'ksp_max_it': 300000})
+    solver.snes.setUp()
+    ksp = solver.snes.ksp
+    kspA00 = ksp.pc.getFieldSplitSubKSP()[0]
+
+    # This is the top left block
+    kspA00.pc.setType(PETSc.PC.Type.PYTHON)
+    kspA00.pc.setPythonContext(APC(DG_inv))
+
+    # Now set the schur complement PC matrix
+    ksp.pc.setFieldSplitSchurPreType(PETSc.PC.SchurPreType.USER, S)
+
+    solver.solve()
     Hsigma, Hlambdar = w.split()
 
     #reconstruct Hu
