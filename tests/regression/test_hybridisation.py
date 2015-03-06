@@ -27,12 +27,12 @@ sin(x[0]*pi*2)*sin(x[1]*pi*2)
 
 import pytest
 from firedrake import *
-
+from firedrake.petsc import PETSc
 class APC(object):
     def __init__(self, A_inv):
         self.A_inv = A_inv
-        def apply(self, pc, x, y):
-            self.A_inv.M.handle.mult(x,y)
+    def apply(self, pc, x, y):
+        self.A_inv.M.handle.mult(x,y)
 
 @pytest.mark.parametrize('degree', range(1, 3))
 def test_hybridisation(degree):
@@ -91,9 +91,16 @@ def test_hybridisation(degree):
     prob = LinearVariationalProblem(a,L,w,bcs=bcs)
     solver = LinearVariationalSolver(prob,
                                      solver_parameters={'ksp_rtol': 1e-14,
-                                                        'ksp_max_it': 300000})
-    solver.snes.setUp()
+                                                        'pc_type': 'fieldsplit',
+                                                        'pc_fieldsplit_type': 'schur',
+                                                        'fieldsplit_0_ksp_type': 'preonly',
+                                                        'fieldsplit_1_ksp_type': 'cg',
+                                                        'fieldsplit_1_pc_type': 'gamg',
+                                                        'fieldsplit_1_ksp_monitor': True,
+                                                        'ksp_monitor': True,
+                                                        'ksp_max_it': 10})
     ksp = solver.snes.ksp
+    ksp.setUp()
     kspA00 = ksp.pc.getFieldSplitSubKSP()[0]
 
     # This is the top left block
