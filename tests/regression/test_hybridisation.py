@@ -68,25 +68,25 @@ def test_hybridisation(degree):
     a = a_dx + a_dS
     L = div(tau)*f*dx
 
-    #build inverse for hybridised solver
-    sigma = TrialFunction(BrokenRT)
-    tau = TestFunction(BrokenRT)
-    DG_inv = assemble(inner(sigma,tau)*dx,inverse=True)
-
     bcs = DirichletBC(W.sub(1), Constant(0), (1, 2, 3, 4))
 
-    #Build a schur complement S
+#build inverse for hybridised solver
+    sigma = TrialFunction(BrokenRT)
+    tau = TestFunction(BrokenRT)
+    DG_inv = assemble((dot(tau, sigma) + div(tau)*div(sigma))*dx,inverse=True)
+    bcs = DirichletBC(W.sub(1), Constant(0), (1, 2, 3, 4))
+
+#Build a schur complement S
     aMat = assemble(a, bcs=bcs)
     B = aMat.M[0,1].handle
     C = aMat.M[1, 0].handle
     D = aMat.M[1, 1].handle
-    
     tmp = DG_inv.M.handle.matMult(B)
     tmp = C.matMult(tmp)
     S = D.copy()
     S.axpy(-1, tmp)
 
-    # Compute solution
+# Compute solution
     w = Function(W)
     prob = LinearVariationalProblem(a,L,w,bcs=bcs)
     solver = LinearVariationalSolver(prob,
@@ -102,14 +102,11 @@ def test_hybridisation(degree):
     ksp = solver.snes.ksp
     ksp.setUp()
     kspA00 = ksp.pc.getFieldSplitSubKSP()[0]
-
-    # This is the top left block
+# This is the top left block
     kspA00.pc.setType(PETSc.PC.Type.PYTHON)
     kspA00.pc.setPythonContext(APC(DG_inv))
-
-    # Now set the schur complement PC matrix
+# Now set the schur complement PC matrix
     ksp.pc.setFieldSplitSchurPreType(PETSc.PC.SchurPreType.USER, S)
-
     solver.solve()
     Hsigma, Hlambdar = w.split()
 
@@ -137,8 +134,8 @@ def test_hybridisation(degree):
     uerr = sqrt(assemble((Hu-NHu)*(Hu-NHu)*dx))
     sigerr = sqrt(assemble(dot(Hsigma-NHsigma, Hsigma-NHsigma)*dx))
 
-    assert uerr < 1e-11
-    assert sigerr < 4e-11
+    assert uerr < 1e-8
+    assert sigerr < 4e-8
 
 if __name__ == '__main__':
     import os

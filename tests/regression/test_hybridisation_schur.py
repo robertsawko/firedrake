@@ -70,7 +70,8 @@ def test_hybridisation(degree):
     #build inverse for hybridised solver
     sigma = TrialFunction(BrokenRT)
     tau = TestFunction(BrokenRT)
-    DG_inv = assemble(inner(sigma,tau)*dx,inverse=True)
+    Aop = (dot(tau, sigma) + div(tau)*div(sigma))*dx
+    DG_inv = assemble(Aop,inverse=True)
 
     #Build a schur complement S
     bcs = DirichletBC(W.sub(1), Constant(0), (1, 2, 3, 4))
@@ -86,7 +87,6 @@ def test_hybridisation(degree):
     S.axpy(-1, tmp)
 
 #build RHS for Schur complement
-    Aop = (dot(tau, sigma) + div(tau)*div(sigma))*dx
     L = (-div(tau)*f*dx)
     u1 = Function(BrokenRT)
     solve(Aop==L,u1)
@@ -103,9 +103,9 @@ def test_hybridisation(degree):
     
     ksp.setFromOptions()
 
-    lambda0 = Function(TraceRT)
+    Hlambdar = Function(TraceRT)
     with L_schur.dat.vec_ro as v:
-        with lambda0.dat.vec as x:
+        with Hlambdar.dat.vec as x:
             ksp.solve(v,x)
 
     #reconstruct Hu and Hsigma
@@ -114,12 +114,13 @@ def test_hybridisation(degree):
     tau,v = TestFunctions(W)
 
     a_recon = (dot(tau, sigma) - div(tau)*u + v*u + v*div(sigma))*dx
-    L_recon = (-jump(tau, n=n)*lambda0('+')*dS 
+    L_recon = (-jump(tau, n=n)*Hlambdar('+')*dS 
                 +v*f*dx)
     w = Function(W)
     solve(a_recon==L_recon, w)
     Hsigma,Hu = w.split()
 
+    ##################################################################
     # Compare result to non-hybridised calculation
     RT = FunctionSpace(mesh, "RT", degree)
     W2 = RT * DG
@@ -135,8 +136,6 @@ def test_hybridisation(degree):
     # (should be identical, i.e. comparable with solver tol)
     uerr = sqrt(assemble((Hu-NHu)*(Hu-NHu)*dx))
     sigerr = sqrt(assemble(dot(Hsigma-NHsigma, Hsigma-NHsigma)*dx))
-
-    print uerr, sigerr
 
     assert uerr < 1e-11
     assert sigerr < 4e-11
