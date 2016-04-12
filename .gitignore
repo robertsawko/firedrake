@@ -18,4 +18,5 @@
 /docs/source/teamgrid.rst
 /docs/source/demos
 /demos/**/*.py
+!/demos/subspace_correction/subspace_correction.py
 /firedrake/mg/impl.c
