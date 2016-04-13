@@ -127,6 +127,8 @@ class SubspaceCorrectionPrec(object):
                 glob_patch[dof_patch[i, j]] = cell_node_map[patch[i], j]
 
             # Mask out dofs on boundary of patch
+            # These are the faces on the boundary that are *not* on
+            # the global domain boundary.
             for f in faces:
                 closure, _ = dm.getTransitiveClosure(f, useCone=True)
                 for p in closure:
@@ -134,9 +136,12 @@ class SubspaceCorrectionPrec(object):
                     for j in range(dof_section.getDof(p)):
                         bc_mask[numpy.where(dof_patch == local[off + j])] = True
 
+            mask = numpy.empty(glob_patch.shape, dtype=bool)
+            for i, j in numpy.ndindex(dof_patch.shape):
+                mask[dof_patch[i, j]] = bc_mask[i, j]
             glob_patches.append(glob_patch)
             dof_patches.append(dof_patch)
-            bc_masks.append(bc_mask)
+            bc_masks.append(mask)
 
         for p, d, g, bcs in zip(patches, dof_patches, glob_patches, bc_masks):
             print p
@@ -171,6 +176,25 @@ class SubspaceCorrectionPrec(object):
             compiled_kernels.append((k, fn))
         self.kernels = compiled_kernels
 
+
+from pyop2 import base as pyop2
+from petsc4py import PETSc
+
+class DenseSparsity(pyop2.Sparsity):
+    def __init__(self):
+        self.shape = (1, 1)
+        pass
+
+
+class DenseMat(pyop2.Mat):
+    def __init__(self, nrows, ncols):
+        mat = PETSc.Mat().createDense(((nrows, nrows), (ncols, ncols)),
+                                      bsize=1,
+                                      comm=PETSc.COMM_SELF)
+        mat.setUp()
+        self.sparsity = DenseSparsity()
+        self.handle = mat
+
 M = RectangleMesh(2, 2, 2.0, 2.0)
 V = FunctionSpace(M, "CG", 2)
 bcs = DirichletBC(V, 0, (1, 2, 3, 4))
@@ -181,3 +205,9 @@ a = inner(grad(u), grad(v))*dx
 SCP = SubspaceCorrectionPrec(a, bcs=None)
 
 SCP.compile_kernels()
+
+# Pk -> P1 restriction on reference element
+# np.dot(np.dot(P2.dual.to_riesz(P1.get_nodal_basis()), P1.get_coeffs().T).T, P2_residual)
+# Generally:
+# np.linalg.solve(Pkmass, PkP1mass)
+# from IPython import embed; embed()
