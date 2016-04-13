@@ -3,6 +3,35 @@ import numpy
 import collections
 import itertools
 import functools
+from coffee.visitor import Visitor
+
+
+
+class RewriteQuals(Visitor):
+
+    def visit_object(self, o, *args, **kwargs):
+        return o
+
+    def visit_list(self, o, *args, **kwargs):
+        return list(self.visit(e, *args, **kwargs) for e in o)
+
+    visit_Node = Visitor.maybe_reconstruct
+
+    def visit_FunDecl(self, o, *args, **kwargs):
+        ops, okwargs = o.operands()
+        try:
+            ops[4].remove("static")
+            ops[4].remove("inline")
+        except ValueError:
+            pass
+        decls = ops[2][1:]
+        for d in decls:
+            d.typ = "double"
+            sym = d.sym
+            rank = sym.rank + (1, )
+            d.sym = sym.reconstruct(sym.symbol, rank=rank)
+        new = o.reconstruct(*ops, **okwargs)
+        return new
 
 
 class SubspaceCorrectionPrec(object):
@@ -115,10 +144,34 @@ class SubspaceCorrectionPrec(object):
             print g
             print bcs
             print
-        
-        
-        
-M = RectangleMesh(2, 2, 1.0, 1.0)
+
+    def compile_kernels(self):
+        from firedrake.tsfc_interface import compile_form
+        from pyop2.compilation import load
+        import ctypes
+        kernels = compile_form(self.a, "subspace_form")
+        v = RewriteQuals()
+        compiled_kernels = []
+        for k in kernels:
+            # Don't want to think about mixed yet
+            assert k.indices == (0, 0)
+            kinfo = k.kinfo
+            assert kinfo.integral_type == "cell"
+            assert not kinfo.oriented
+            assert len(kinfo.coefficient_map) == 0
+
+            kernel = kinfo.kernel
+            # Rewrite to remove static inline
+            kernel._ast = v.visit(kernel._ast)
+            kernel._code = None
+            code = kernel.code()
+            code = code.replace("static inline ", "#include <math.h>\n")
+            fn = load(code, "c", kernel.name, argtypes=[ctypes.c_voidp] * len(kernel._ast.args),
+                      restype=None)
+            compiled_kernels.append((k, fn))
+        self.kernels = compiled_kernels
+
+M = RectangleMesh(2, 2, 2.0, 2.0)
 V = FunctionSpace(M, "CG", 2)
 bcs = DirichletBC(V, 0, (1, 2, 3, 4))
 u = TrialFunction(V)
@@ -126,3 +179,5 @@ v = TestFunction(V)
 a = inner(grad(u), grad(v))*dx
 
 SCP = SubspaceCorrectionPrec(a, bcs=None)
+
+SCP.compile_kernels()
