@@ -83,7 +83,7 @@ class SubspaceCorrectionPrec(object):
 
         dof_patches = []
         glob_patches = []
-        masked_dof_patches = []
+        bc_masks = []
         from functools import partial
         for patch, faces in zip(patches, patch_faces):
             local = collections.defaultdict(partial(next, itertools.count()))
@@ -110,17 +110,15 @@ class SubspaceCorrectionPrec(object):
                     for j in range(dof_section.getDof(p)):
                         bc_mask[numpy.where(dof_patch == local[off + j])] = True
 
-            masked = numpy.copy(dof_patch)
-            masked[bc_mask] = -1
             glob_patches.append(glob_patch)
             dof_patches.append(dof_patch)
-            masked_dof_patches.append(masked)
+            bc_masks.append(numpy.unique(dof_patch[bc_mask]))
 
         self.patches = patches
         self.dof_patches = dof_patches
         self.glob_patches = glob_patches
-        self.masked_dof_patches = masked_dof_patches
-        for p, d, g, m in zip(patches, dof_patches, glob_patches, masked_dof_patches):
+        self.bc_patches = bc_masks
+        for p, d, g, m in zip(patches, dof_patches, glob_patches, bc_masks):
             print p
             print d
             print g
@@ -310,11 +308,11 @@ for i in range(len(SCP.patches)):
     end = cells.shape[0]
     cells = cells.ctypes.data
     matarg = matrices[i].handle.handle
-    matmap = SCP.masked_dof_patches[i].ctypes.data
+    matmap = SCP.dof_patches[i].ctypes.data
     callable(0, end, cells, matarg, matmap, matmap, coordarg, coordmap)
     matrices[i].handle.assemble()
-    # Need to splat the identity onto the diagonal on bc nodes.
-    # matrices[i].handle.view()
+    matrices[i].handle.zeroRowsColumns(SCP.bc_patches[i])
+    matrices[i].handle.view()
     # print "\n\n"
 
 # Pk -> P1 restriction on reference element
