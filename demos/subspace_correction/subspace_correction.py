@@ -378,3 +378,27 @@ print norm(assemble(exact - u))
 # np.dot(np.dot(P2.dual.to_riesz(P1.get_nodal_basis()), P1.get_coeffs().T).T, P2_residual)
 # Generally:
 # np.linalg.solve(Pkmass, PkP1mass)
+
+from tsfc.coffee import generate
+from tsfc.kernel_interface import KernelBuilderBase
+from gem import gem, impero_utils
+
+output = gem.Variable("A", (3, ))
+
+i = gem.Index("i")
+j = gem.Index("j")
+
+P1 = FunctionSpace(M, "CG", 1)
+
+weights = gem.Literal(numpy.dot(V.fiat_element.dual.to_riesz(P1.fiat_element.get_nodal_basis()),
+                                P1.fiat_element.get_coeffs().T).T)
+
+input = gem.Variable("residual", (6, 1))
+
+rvalue = gem.IndexSum(gem.Product(gem.Indexed(weights, (i, j)), gem.Indexed(input, (j, 0))), j)
+
+lvalue = gem.Indexed(output, (i, ))
+
+ir = impero_utils.compile_gem([lvalue], [rvalue], [i])
+
+body = generate(ir, {i: i.name, j: j.name})
