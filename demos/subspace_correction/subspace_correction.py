@@ -7,6 +7,20 @@ import collections
 import itertools
 import functools
 
+import ufl
+from ufl.algorithms import map_integrands, MultiFunction
+
+
+class ReplaceArguments(MultiFunction):
+    def __init__(self, test, trial):
+        self.args = {0: test, 1: trial}
+        super(ReplaceArguments, self).__init__()
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def argument(self, o):
+        return self.args[o.number()]
+
 
 class SubspaceCorrectionPrec(object):
     """Given a bilinear form, constructs a subspace correction preconditioner
@@ -18,6 +32,7 @@ class SubspaceCorrectionPrec(object):
     :arg a:  A bilinear form defined in UFL
     :arg bcs: Optional strongly enforced boundary conditions
     """
+
     def __init__(self, a, bcs=None):
         self.a = a
         if bcs is None:
@@ -118,6 +133,11 @@ class SubspaceCorrectionPrec(object):
         self.dof_patches = dof_patches
         self.glob_patches = glob_patches
         self.bc_patches = bc_masks
+
+    def P1_operator(self, P1space):
+        mapper = ReplaceArguments(TestFunction(P1space),
+                                  TrialFunction(P1space))
+        return map_integrands.map_integrand_dags(mapper, self.a)
 
     def compile_kernels(self):
         from firedrake.tsfc_interface import compile_form
