@@ -75,7 +75,7 @@ class SubspaceCorrectionPrec(object):
             patch_faces.append(boundary_faces)
             # Both of the vertices and cells are in plex numbering,
             patches.append(numpy.array([cell_numbering.getOffset(c)
-                                        for c in cells]))
+                                        for c in cells], dtype=numpy.int32))
 
         # Have a functionspace V
         cell_node_map = V.cell_node_map().values
@@ -118,12 +118,6 @@ class SubspaceCorrectionPrec(object):
         self.dof_patches = dof_patches
         self.glob_patches = glob_patches
         self.bc_patches = bc_masks
-        for p, d, g, m in zip(patches, dof_patches, glob_patches, bc_masks):
-            print p
-            print d
-            print g
-            print m
-            print
 
     def compile_kernels(self):
         from firedrake.tsfc_interface import compile_form
@@ -271,15 +265,18 @@ class JITModule(seq.JITModule):
         return None
 
 # Works in 3D too!
-# M = UnitCubeMesh(3, 3, 3)
-M = RectangleMesh(2, 2, 2.0, 2.0)
+# M = UnitCubeMesh(5, 5, 4)
+M = RectangleMesh(10, 10, 2.0, 2.0)
 V = FunctionSpace(M, "CG", 2)
-bcs = DirichletBC(V, 0, (1, 2, 3, 4))
+bcs = DirichletBC(V, 0, (1, 2, 3, 4, 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
 a = inner(grad(u), grad(v))*dx
 
-SCP = SubspaceCorrectionPrec(a, bcs=None)
+L = v*dx
+u = Function(V)
+
+SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
 SCP.compile_kernels()
 
@@ -311,10 +308,52 @@ for i in range(len(SCP.patches)):
     matmap = SCP.dof_patches[i].ctypes.data
     callable(0, end, cells, matarg, matmap, matmap, coordarg, coordmap)
     matrices[i].handle.assemble()
+    # matrices[i].handle.view()
     matrices[i].handle.zeroRowsColumns(SCP.bc_patches[i])
-    matrices[i].handle.view()
     # print "\n\n"
 
+ksps = [PETSc.KSP().create() for _ in matrices]
+vecs = []
+for ksp, mat in zip(ksps, matrices):
+    ksp.setOperators(mat.handle, mat.handle)
+    ksp.setOptionsPrefix("sub_")
+    ksp.setFromOptions()
+    vecs.append(mat.handle.createVecs())
+
+
+class PatchPC(object):
+
+    def apply(self, pc, x, y):
+        y.set(0)
+        # Apply y <- PC(x)
+        for ksp, (lx, b), patch_dofs, bc in zip(ksps, vecs, SCP.glob_patches, SCP.bc_patches):
+            b.array[:] = x.array_r[patch_dofs]
+            # Homogeneous dirichlet bcs on patch boundary
+            # FIXME: Condense bcs nodes out of system entirely
+            b.array[bc] = 0
+            ksp.solve(b, lx)
+        for (ly, _), patch_dofs in zip(vecs, SCP.glob_patches):
+            y.array[patch_dofs] += ly.array_r[:]
+
+
+
+numpy.set_printoptions(linewidth=200, precision=4)
+
+A = assemble(a, bcs=bcs)
+
+b = assemble(L)
+
+solver = LinearSolver(A, options_prefix="")
+solver.solve(u, b)
+
+# diag = A.M.values.diagonal()
+# print residual.dat.data_ro / diag
+
+exact = Function(V)
+solve(a == L, exact, bcs=bcs)
+
+print norm(assemble(exact - u))
+# print u.dat.data_ro
 # Pk -> P1 restriction on reference element
 # np.dot(np.dot(P2.dual.to_riesz(P1.get_nodal_basis()), P1.get_coeffs().T).T, P2_residual)
 # Generally:
