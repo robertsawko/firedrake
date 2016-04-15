@@ -287,14 +287,27 @@ class JITModule(seq.JITModule):
 # Works in 3D too!
 # M = UnitCubeMesh(5, 5, 4)
 M = RectangleMesh(10, 10, 2.0, 2.0)
+M.coordinates.dat.data[:] -= 1
 V = FunctionSpace(M, "CG", 2)
-bcs = DirichletBC(V, 0, (1, 2, 3, 4, 5, 6))
+bcs = DirichletBC(V, 0, (1, 2, 3, 4)) # , 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
 a = inner(grad(u), grad(v))*dx
+coords = SpatialCoordinate(M)
+x = variable(coords[0])
+y = variable(coords[1])
+sx = sin(pi*x)
+sy = sin(pi*y)
+cx = cos(pi*x)
+cy = cos(pi*y)
+xx = x*x
+yy = y*y
+exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
 
-L = v*dx
-u = Function(V)
+forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
+
+L = forcing*v*dx
+u = Function(V, name="solution")
 
 SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
