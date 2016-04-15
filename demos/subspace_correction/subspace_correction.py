@@ -77,6 +77,7 @@ class SubspaceCorrectionPrec(object):
             closure, orientation = dm.getTransitiveClosure(v, useCone=False)
             cells = closure[numpy.logical_and(cstart <= closure, closure < cend)]
             # find faces that are on boundary of cell patch
+            scells = set(cells)
             boundary_faces = []
             for c in cells:
                 faces = dm.getCone(c)
@@ -84,8 +85,9 @@ class SubspaceCorrectionPrec(object):
                     # Only select faces if they are not on the domain boundary
                     if dm.getLabelValue("exterior_facets", f) == 1:
                         continue
-                    closure, _ = dm.getTransitiveClosure(f, useCone=True)
-                    if v not in closure:
+                    f_cells = set(dm.getSupport(f))
+                    if len(f_cells.difference(scells)) > 0:
+                        # One of the cells is not in our patch.
                         boundary_faces.append(f)
             patch_faces.append(boundary_faces)
             # Both of the vertices and cells are in plex numbering,
