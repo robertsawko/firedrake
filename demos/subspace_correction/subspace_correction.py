@@ -372,46 +372,206 @@ class PatchPC(object):
 
 numpy.set_printoptions(linewidth=200, precision=4)
 
-A = assemble(a, bcs=bcs)
+# # diag = A.M.values.diagonal()
+# # print residual.dat.data_ro / diag
 
-b = assemble(L)
+# exact = Function(V)
+# solve(a == L, exact, bcs=bcs)
 
-solver = LinearSolver(A, options_prefix="")
-solver.solve(u, b)
-
-# diag = A.M.values.diagonal()
-# print residual.dat.data_ro / diag
-
-exact = Function(V)
-solve(a == L, exact, bcs=bcs)
-
-print norm(assemble(exact - u))
+# print norm(assemble(exact - u))
 # print u.dat.data_ro
 # Pk -> P1 restriction on reference element
 # np.dot(np.dot(P2.dual.to_riesz(P1.get_nodal_basis()), P1.get_coeffs().T).T, P2_residual)
 # Generally:
 # np.linalg.solve(Pkmass, PkP1mass)
 
-from tsfc.coffee import generate
-from tsfc.kernel_interface import KernelBuilderBase
-from gem import gem, impero_utils
 
-output = gem.Variable("A", (3, ))
+def get_transfer_kernel(Pk, P1, restriction=True,
+                        matrix_kernel=True):
+    """Compile a kernel that will map between Pk and P1.
 
-i = gem.Index("i")
-j = gem.Index("j")
+    :arg Pk: The high order Pk space (a FunctionSpace).
+    :arg P1: The P1 space on the same mesh (a FunctionSpace).
+    :kwarg restriction: If True compute a restriction operator, if
+         False, a prolongation operator.
+    :kwarg matrix_kernel: If True, return an operator that computes a
+         element matrix, otherwise an operator to do the transfer
+         matrix free.
+    :returns: a COFFEE FunDecl object.
+
+    The prolongation maps a solution in P1 into Pk using the natural
+    embedding.  The restriction maps a residual in the dual of Pk into
+    the dual of P1 (it is the dual of the prolongation), computed
+    using linearity of the test function.
+    """
+    # Mapping of a residual in Pk into a residual in P1
+    from coffee import base as coffee
+    from tsfc.coffee import generate as generate_coffee
+    from tsfc.kernel_interface import prepare_coefficient, prepare_arguments
+    from gem import gem, impero_utils as imp
+    import ufl
+    import numpy
+
+    # Pk should be at least the same size as P1
+    assert Pk.fiat_element.space_dimension() >= P1.fiat_element.space_dimension()
+    # In the general case we should compute this by doing:
+    # numpy.linalg.solve(Pkmass, PkP1mass)
+    matrix = numpy.dot(Pk.fiat_element.dual.to_riesz(P1.fiat_element.get_nodal_basis()),
+                       P1.fiat_element.get_coeffs().T).T
+
+    if restriction:
+        Vout, Vin = P1, Pk
+        weights = gem.Literal(matrix)
+        name = "Pk_P1_mapper"
+    else:
+        # Prolongation
+        Vout, Vin = Pk, P1
+        weights = gem.Literal(matrix.T)
+        name = "P1_Pk_mapper"
+
+    i = gem.Index("i")
+    j = gem.Index("j")
+
+    funargs = []
+    if matrix_kernel:
+        outarg, prepare, outgem, finalise = prepare_arguments((ufl.TestFunction(Vout),
+                                                               ufl.TrialFunction(Vin)),
+                                                              (i, j), False)
+    else:
+        outarg, prepare, outgem, finalise = prepare_arguments((ufl.TestFunction(Vout), )
+                                                              (i, ), False)
+    assert len(prepare) == 0
+    assert len(finalise) == 0
+    funargs.append(outarg)
+
+    if matrix_kernel:
+        exprs = [gem.Indexed(weights, (i, j))]
+    else:
+        inarg, prepare, ingem = prepare_coefficient(ufl.Coefficient(Vin), "input")
+        assert len(prepare) == 0
+        funargs.append(inarg)
+        exprs = [gem.IndexSum(gem.Product(gem.Indexed(weights, (i, j)),
+                                          gem.Indexed(ingem, (j, ))), j)]
+
+    ir = imp.compile_gem(outgem, exprs, (i, j))
+
+    body = generate_coffee(ir, {i: i.name, j: j.name})
+    function = coffee.FunDecl("void", name, funargs, body,
+                              pred=["static", "inline"])
+
+    return op2.Kernel(function, name=function.name)
 
 P1 = FunctionSpace(M, "CG", 1)
 
-weights = gem.Literal(numpy.dot(V.fiat_element.dual.to_riesz(P1.fiat_element.get_nodal_basis()),
-                                P1.fiat_element.get_coeffs().T).T)
 
-input = gem.Variable("residual", (6, 1))
+u = TestFunction(P1)
+v = TrialFunction(P1)
+low = inner(grad(u), grad(v))*dx
+lowbc = DirichletBC(P1, 0, (1, 2, 3, 4))
 
-rvalue = gem.IndexSum(gem.Product(gem.Indexed(weights, (i, j)), gem.Indexed(input, (j, 0))), j)
+lo_op = assemble(low, bcs=lowbc).M.handle
 
-lvalue = gem.Indexed(output, (i, ))
+sp = op2.Sparsity((P1.dof_dset,
+                   V.dof_dset),
+                  (P1.cell_node_map(),
+                   V.cell_node_map()),
+                  "mapper")
+mat = op2.Mat(sp, PETSc.ScalarType)
 
-ir = impero_utils.compile_gem([lvalue], [rvalue], [i])
+op2.par_loop(get_transfer_kernel(V, P1), M.cell_set,
+             mat(op2.WRITE, (P1.cell_node_map([lowbc])[op2.i[0]],
+                             V.cell_node_map([bcs])[op2.i[1]])))
 
-body = generate(ir, {i: i.name, j: j.name})
+mat.assemble()
+mat._force_evaluation()
+transfer = mat.handle
+
+
+# Needs to be composed with something else to do the high order
+# smoothing.  Otherwise we get into a situation where the residual in
+# the P1 space is zero but there are still some high frequency
+# components.  The idea is that we use the patch-based smoother above.
+# For example:
+# python subspace_correction.py  \
+#     -ksp_type cg \
+#     -ksp_monitor_true_residual \
+#     -pc_type composite \
+#     -pc_composite_pcs jacobi,python \
+#     -pc_composite_type additive \
+#     -sub_0_pc_type jacobi \
+#     -sub_1_pc_type python \
+#     -sub_1_pc_python_type __main__.P1PC  \
+#     -sub_1_lo_pc_type hypre
+#
+# Multiplicative doesn't work nearly as well as additive, need to understand why.
+class P1PC(object):
+
+    def setUp(self, pc):
+        self.pc = PETSc.PC().create()
+        self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
+        self.pc.setOperators(lo_op, lo_op)
+        self.pc.setUp()
+        self.pc.setFromOptions()
+
+    def view(self, pc, viewer=None):
+        if viewer is not None:
+            comm = viewer.comm
+        else:
+            comm = pc.comm
+
+        PETSc.Sys.Print("Low-order P1, inner pc follows", comm=comm)
+        self.pc.view(viewer)
+
+    def apply(self, pc, x, y):
+        l = transfer.createVecLeft()
+        transfer.mult(x, l)
+        tmp = l.duplicate()
+        self.pc.apply(l, tmp)
+        transfer.multTranspose(tmp, y)
+        # Matrix-free would look a little like this
+        # # restrict x to P1
+        # low = Function(P1)
+        # high = Function(V)
+        # with high.dat.vec_ro as v:
+        #     x.copy(v)
+        # print v.array_r
+        # op2.par_loop(get_transfer_kernel(V, P1),
+        #              M.cell_set,
+        #              low.dat(op2.INC, low.cell_node_map()[op2.i[0]],
+        #                      flatten=True),
+        #              high.dat(op2.READ, high.cell_node_map(),
+        #                       flatten=True))
+        # with low.dat.vec as v:
+        #     print v.array_r
+        #     tmp = v.duplicate()
+        #     self.pc.apply(v, tmp)
+        #     tmp.copy(v)
+        # op2.par_loop(get_transfer_kernel(V, P1, restriction=False),
+        #              M.cell_set,
+        #              high.dat(op2.WRITE, high.cell_node_map()[op2.i[0]],
+        #                       flatten=True),
+        #              low.dat(op2.READ, low.cell_node_map(),
+        #                      flatten=True))
+        # with high.dat.vec_ro as v:
+        #     v.copy(y)
+
+
+A = assemble(a, bcs=bcs)
+
+b = assemble(L)
+
+solver = LinearSolver(A, options_prefix="")
+u = Function(V, name="solution")
+
+solver.solve(u, b)
+
+exact = Function(V).interpolate(exact_expr)
+diff = assemble(exact - u)
+# diff.rename("difference")
+# exact.rename("exact")
+print norm(diff)
+
+# print u.dat.data_ro
+# File("out.pvd").write(diff, exact, u)
+# File("out.pvd").write(u)
+# print u.dat.data_ro
