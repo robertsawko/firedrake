@@ -347,29 +347,40 @@ for i in range(len(SCP.patches)):
     matrices[i].handle.zeroRowsColumns(SCP.bc_patches[i])
     # print "\n\n"
 
-ksps = [PETSc.KSP().create() for _ in matrices]
-vecs = []
-for ksp, mat in zip(ksps, matrices):
-    ksp.setOperators(mat.handle, mat.handle)
-    ksp.setOptionsPrefix("sub_")
-    ksp.setFromOptions()
-    vecs.append(mat.handle.createVecs())
-
 
 class PatchPC(object):
+
+    def setUp(self, pc):
+        self.ksps = [PETSc.KSP().create() for _ in matrices]
+        self.vecs = []
+        pfx = pc.getOptionsPrefix()
+        for ksp, mat in zip(self.ksps, matrices):
+            ksp.setOperators(mat.handle, mat.handle)
+            ksp.setOptionsPrefix(pfx + "sub_")
+            ksp.setFromOptions()
+            self.vecs.append(mat.handle.createVecs())
+
+    def view(self, pc, viewer=None):
+        if viewer is not None:
+            comm = viewer.comm
+        else:
+            comm = pc.comm
+
+        PETSc.Sys.Print("Vertex-patch preconditioner, all subsolves identical", comm=comm)
+        self.ksps[0].view(viewer)
 
     def apply(self, pc, x, y):
         y.set(0)
         # Apply y <- PC(x)
-        for ksp, (lx, b), patch_dofs, bc in zip(ksps, vecs, SCP.glob_patches, SCP.bc_patches):
+        for ksp, (lx, b), patch_dofs, bc in zip(self.ksps, self.vecs, SCP.glob_patches, SCP.bc_patches):
             b.array[:] = x.array_r[patch_dofs]
             # Homogeneous dirichlet bcs on patch boundary
             # FIXME: Condense bcs nodes out of system entirely
             b.array[bc] = 0
             ksp.solve(b, lx)
-        for (ly, _), patch_dofs in zip(vecs, SCP.glob_patches):
+        # This is additive only, should try and do multiplicative as well.
+        for (ly, _), patch_dofs in zip(self.vecs, SCP.glob_patches):
             y.array[patch_dofs] += ly.array_r[:]
-
 
 
 numpy.set_printoptions(linewidth=200, precision=4)
@@ -506,6 +517,18 @@ transfer = mat.handle
 #     -sub_1_lo_pc_type hypre
 #
 # Multiplicative doesn't work nearly as well as additive, need to understand why.
+# Example composed with the Patch PC.
+# python subspace_correction.py \
+#     -ksp_type cg \
+#     -ksp_monitor_true_residual \
+#     -pc_type composite \
+#     -pc_composite_type additive \
+#     -pc_composite_pcs python,python \
+#     -sub_0_pc_python_type __main__.PatchPC \
+#     -sub_0_sub_ksp_type preonly \
+#     -sub_0_sub_pc_type lu \
+#     -sub_1_pc_python_type __main__.P1PC \
+#     -sub_1_lo_pc_type lu
 class P1PC(object):
 
     def setUp(self, pc):
