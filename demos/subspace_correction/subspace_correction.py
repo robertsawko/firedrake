@@ -135,6 +135,7 @@ class SubspaceCorrectionPrec(object):
         self.dof_patches = dof_patches
         self.glob_patches = glob_patches
         self.bc_patches = bc_masks
+        self.patch_faces = patch_faces
 
     def P1_operator(self, P1space):
         mapper = ReplaceArguments(TestFunction(P1space),
@@ -266,9 +267,12 @@ class MatArg(seq.Arg):
 
 class DenseMat(pyop2.Mat):
     def __init__(self, nrows, ncols):
-        mat = PETSc.Mat().createDense(((nrows, nrows), (ncols, ncols)),
-                                      bsize=1,
-                                      comm=PETSc.COMM_SELF)
+        mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
+        mat.setSizes(((nrows, nrows), (ncols, ncols)),
+                     bsize=1)
+        mat.setType(mat.Type.DENSE)
+        mat.setOptionsPrefix("scp_")
+        mat.setFromOptions()
         mat.setUp()
         self._sparsity = DenseSparsity(nrows, ncols)
         self.handle = mat
@@ -287,10 +291,14 @@ class JITModule(seq.JITModule):
         return None
 
 # Works in 3D too!
-# M = UnitCubeMesh(5, 5, 4)
-M = RectangleMesh(10, 10, 2.0, 2.0)
+
+import sys
+
+L = int(sys.argv[1])
+k = int(sys.argv[2])
+M = RectangleMesh(L, L, 2.0, 2.0)
 M.coordinates.dat.data[:] -= 1
-V = FunctionSpace(M, "CG", 2)
+V = FunctionSpace(M, "CG", k)
 bcs = DirichletBC(V, 0, (1, 2, 3, 4)) # , 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
@@ -315,7 +323,12 @@ SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
 SCP.compile_kernels()
 
-# Build the patch matrices
+from impl.patches import get_cell_facet_patches, get_dof_patches
+cells, facets = get_cell_facet_patches(M._plex, M._cell_numbering)
+from IPython import embed; embed()
+import sys
+sys.exit(0)
+# build the patch matrices
 matrices = []
 for glob_patch in SCP.glob_patches:
     size = glob_patch.shape[0]

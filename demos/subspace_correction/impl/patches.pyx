@@ -1,0 +1,280 @@
+import numpy
+from collections import namedtuple
+cimport numpy
+cimport petsc4py.PETSc as PETSc
+
+from patches cimport *
+
+numpy.import_array()
+
+class RaggedArray(tuple):
+
+    @property
+    def offset(self):
+        return self[0]
+
+    @property
+    def value(self):
+        return self[1]
+
+    def __repr__(self):
+        ret = ["RaggedArray(["]
+        for i in range(len(self.offset) - 1):
+            s = self.offset[i]
+            e = self.offset[i+1]
+            ret.append("  " + repr(self.value[s:e]))
+        ret.append("])")
+        return "\n".join(ret)
+
+    
+def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
+    cdef:
+        PetscInt i, j, k, c, ci, v, start, end
+        PetscInt vStart, vEnd
+        PetscInt fStart, fEnd
+        PetscInt cStart, cEnd
+        PetscInt nfacet, ncell = 0, nclosure
+        PetscBool flg
+        PetscInt *closure = NULL
+        PetscInt *facets = NULL
+        PetscInt *facet_cells = NULL
+        PetscInt fidx = 0
+        PetscHashI ht
+        PetscHashIIter iter = 0, ret = 0
+        DMLabel facet_label
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_rows
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facet_rows
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facets
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_cells
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] tmp
+
+    vStart, vEnd = dm.getDepthStratum(0)
+    fStart, fEnd = dm.getHeightStratum(1)
+    cStart, cEnd = dm.getHeightStratum(0)
+
+    DMGetLabel(dm.dm, <char *>"exterior_facets", &facet_label)
+    DMLabelCreateIndex(facet_label, fStart, fEnd)
+
+    csr_rows = numpy.empty(vEnd - vStart + 1, dtype=numpy.int32)
+    csr_rows[0] = 0
+
+    # Count number of cells per patch
+    # This needs to change if we want a different determination of a
+    # "patch".
+    for v in range(vStart, vEnd):
+        # Get iterated support of the vertex (star)
+        DMPlexGetTransitiveClosure(dm.dm, v, PETSC_FALSE,
+                                   &nclosure, &closure)
+        for ci in range(nclosure):
+            if cStart <= closure[2*ci] < cEnd:
+                ncell += 1
+        # Store cell counts
+        csr_rows[v - vStart + 1] = ncell
+
+    # Allocate cells
+    csr_cells = numpy.empty(ncell, dtype=numpy.int32)
+    csr_facet_rows = numpy.empty(vEnd - vStart + 1, dtype=numpy.int32)
+    csr_facet_rows[0] = 0
+    # Guess at how many boundary facets there will be
+    csr_facets = numpy.empty(1 + ncell/4, dtype=numpy.int32)
+
+    PetscHashICreate(ht)
+    for v in range(vStart, vEnd):
+        PetscHashIClear(ht)
+        DMPlexGetTransitiveClosure(dm.dm, v, PETSC_FALSE,
+                                   &nclosure, &closure)
+        i = 0
+        start = csr_rows[v - vStart]
+        end = csr_rows[v - vStart + 1]
+        # Store patch's cells
+        for ci in range(nclosure):
+            if cStart <= closure[2*ci] < cEnd:
+                PetscHashIPut(ht, closure[2*ci], ret, iter)
+                csr_cells[start + i] = closure[2*ci]
+                i += 1
+
+        # Determine boundary
+        for i in range(start, end):
+            # Get the cell's facets
+            DMPlexGetCone(dm.dm, csr_cells[i], <const PetscInt **>&facets)
+            # How many facets on the cell
+            DMPlexGetConeSize(dm.dm, csr_cells[i], &nfacet)
+            for j in range(nfacet):
+                DMLabelHasPoint(facet_label, facets[j], &flg)
+                if flg:
+                    # facet is on domain boundary, don't select it
+                    continue
+                # Get the cells incident to the facet (2 of them)
+                DMPlexGetSupport(dm.dm, facets[j], <const PetscInt **>&facet_cells)
+                for k in range(2):
+                    PetscHashIHasKey(ht, facet_cells[k], flg)
+                    if flg:
+                        # Facet's cell is inside patch
+                        continue
+                    # Cell not in patch, therefore facet on boundary
+                    # Realloc if necessary
+                    if fidx == csr_facets.shape[0]:
+                        tmp = csr_facets
+                        csr_facets = numpy.empty(int(fidx * 1.5),
+                                                 dtype=numpy.int32)
+                        csr_facets[:fidx] = tmp
+                    csr_facets[fidx] = facets[j]
+                    fidx += 1
+                    break
+        csr_facet_rows[v - vStart + 1] = fidx
+    PetscHashIDestroy(ht)
+    # Truncate
+    csr_facets = csr_facets[:fidx].copy()
+    for i in range(ncell):
+        # Convert from PETSc numbering to Firedrake numbering
+        PetscSectionGetOffset(cell_numbering.sec, csr_cells[i], &c)
+        csr_cells[i] = c
+
+    if closure != NULL:
+        DMPlexRestoreTransitiveClosure(dm.dm, 0, PETSC_FALSE, NULL, &closure)
+
+    return RaggedArray([csr_rows, csr_cells]), RaggedArray([csr_facet_rows, csr_facets])
+
+
+def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
+                    numpy.ndarray[numpy.int32_t, ndim=2, mode="c"] cell_node_map,
+                    numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] bc_nodes,
+                    cells,
+                    facets):
+
+    cdef:
+        PetscInt i, j, c, ci, f, start, end, p
+        PetscInt gdof, ldof, bcdof
+        PetscInt dof_per_cell, size
+        PetscInt offset
+        PetscInt dofidx = 0, gidx = 0, bcidx = 0
+        PetscInt nclosure
+        PetscInt *closure = NULL
+        PetscInt *bc_patch = NULL
+        PetscBool flg
+        PetscHashI ht
+        PetscHashI global_bcs
+        PetscHashI local_bcs
+        PetscHashIIter iter = 0, ret = 0
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_cell_rows = cells.offset
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_cells = cells.value
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facet_rows = facets.offset
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facets = facets.value
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] patch_dofs
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] patch_rows
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] bc_dofs
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] bc_rows
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] global_dofs
+        numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] global_rows
+
+    dof_per_cell = cell_node_map.shape[1]
+    patch_dofs = numpy.empty(csr_cell_rows[-1] * dof_per_cell, dtype=numpy.int32)
+    patch_rows = numpy.empty_like(csr_cell_rows)
+    global_dofs = numpy.empty(1 + dof_per_cell*csr_cell_rows.shape[0], dtype=numpy.int32)
+    global_rows = numpy.empty_like(csr_cell_rows)
+    bc_dofs = numpy.empty(1 + csr_cell_rows[-1], dtype=numpy.int32)
+    bc_rows = numpy.empty_like(csr_cell_rows)
+
+    patch_rows[0] = 0
+    global_rows[0] = 0
+    bc_rows[0] = 0
+
+    PetscHashICreate(global_bcs)
+    for i in range(bc_nodes.shape[0]):
+        bc = bc_nodes[i]
+        PetscHashIPut(global_bcs, bc, ret, iter)
+
+    PetscHashICreate(ht)
+    PetscHashICreate(local_bcs)
+    for p in range(csr_cell_rows.shape[0] - 1):
+        # Reset for new patch
+        PetscHashIClear(local_bcs)
+        PetscHashIClear(ht)
+        start = csr_cell_rows[p]
+        end = csr_cell_rows[p+1]
+        size = 0
+        # Determine patch cell->node map
+        for i in range(end - start):
+            c = csr_cells[i + start]
+            for j in range(dof_per_cell):
+                gdof = cell_node_map[c, j]
+                PetscHashIMap(ht, gdof, ldof)
+                if ldof == -1:
+                    ldof = size
+                    size += 1
+                    PetscHashIAdd(ht, gdof, ldof)
+                patch_dofs[dofidx] = ldof
+                # This dof is globally a bc, so make it a patch
+                # local bc.
+                PetscHashIHasKey(global_bcs, gdof, flg)
+                if flg:
+                    PetscHashIPut(local_bcs, ldof, ret, iter)
+                dofidx += 1
+        patch_rows[p + 1] = dofidx
+
+        # Realloc?
+        if gidx + size >= global_dofs.shape[0]:
+            tmp = global_dofs
+            global_dofs = numpy.empty(int((gidx + size) * 1.5),
+                                       dtype=numpy.int32)
+            global_dofs[:tmp.shape[0]] = tmp
+
+        PetscHashIIterBegin(ht, iter)
+        while not PetscHashIIterAtEnd(ht, iter):
+            PetscHashIIterGetKeyVal(ht, iter, gdof, offset)
+            global_dofs[gidx + offset] = gdof
+            PetscHashIIterNext(ht, iter)
+        gidx += size
+        global_rows[p + 1] = gidx
+
+        # Now build the facet related stuff
+        start = csr_facet_rows[p]
+        end = csr_facet_rows[p+1]
+        for i in range(start, end):
+            f = csr_facets[i]
+            DMPlexGetTransitiveClosure(dm.dm, f, PETSC_TRUE, &nclosure, &closure)
+            for ci in range(nclosure):
+                PetscSectionGetDof(dof_section.sec, closure[2*ci], &size)
+                if size > 0:
+                    PetscSectionGetOffset(dof_section.sec, closure[2*ci], &offset)
+                    for j in range(size):
+                        # All the dofs on the boundary facets are part
+                        # of the local bcs
+                        PetscHashIMap(ht, offset + j, ldof)
+                        assert ldof >= 0
+                        PetscHashIPut(local_bcs, ldof, ret, iter)
+
+        # Allocate bcs data structure
+        PetscHashISize(local_bcs, size)
+        PetscMalloc1(size, &bc_patch)
+        j = 0
+        # Get the local dofs
+        PetscHashIGetKeys(local_bcs, &j, bc_patch)
+        assert j == size
+        PetscSortInt(size, bc_patch)
+        if bcidx + size >= bc_dofs.shape[0]:
+            tmp = bc_dofs
+            bc_dofs = numpy.empty(int((bcidx + size) * 1.5),
+                                     dtype=numpy.int32)
+            bc_dofs[:tmp.shape[0]] = tmp
+
+        for j in range(size):
+            bc_dofs[bcidx + j] = bc_patch[j]
+        bcidx += size
+        bc_rows[p + 1] = bcidx
+        PetscFree(bc_patch)
+
+        
+    PetscHashIDestroy(local_bcs)
+    PetscHashIDestroy(global_bcs)
+    PetscHashIDestroy(ht)
+    global_dofs = global_dofs[:gidx].copy()
+    bc_dofs = bc_dofs[:bcidx].copy()
+    if closure != NULL:
+        DMPlexRestoreTransitiveClosure(dm.dm, 0, PETSC_FALSE, NULL, &closure)
+
+    return RaggedArray([patch_rows, patch_dofs]), RaggedArray([global_rows, global_dofs]), \
+        RaggedArray([bc_rows, bc_dofs])
+                
+
+                    
