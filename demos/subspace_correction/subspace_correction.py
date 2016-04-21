@@ -9,6 +9,7 @@ import functools
 
 import ufl
 from ufl.algorithms import map_integrands, MultiFunction
+from impl.patches import get_cell_facet_patches, get_dof_patches
 
 
 class ReplaceArguments(MultiFunction):
@@ -35,107 +36,107 @@ class SubspaceCorrectionPrec(object):
 
     def __init__(self, a, bcs=None):
         self.a = a
-        if bcs is None:
-            bcs = ()
-        try:
-            bcs = tuple(bcs)
-        except TypeError:
-            bcs = (bcs, )
-        nodes = set()
-        for bc in bcs:
-            nodes.update(bc.nodes)
-        self.bc_nodes = nodes
+        # if bcs is None:
+        #     bcs = ()
+        # try:
+        #     bcs = tuple(bcs)
+        # except TypeError:
+        #     bcs = (bcs, )
+        # nodes = set()
+        # for bc in bcs:
+        #     nodes.update(bc.nodes)
+        # self.bc_nodes = nodes
 
-        # one phase of the preconditioner involves restricting the problem
-        # to the patch around each vertex and solving it.  So, we'll need
-        # to grab that information from the mesh's plex object
-        mesh = a.ufl_domain()
-        self.mesh = mesh
+        # # one phase of the preconditioner involves restricting the problem
+        # # to the patch around each vertex and solving it.  So, we'll need
+        # # to grab that information from the mesh's plex object
+        # mesh = a.ufl_domain()
+        # self.mesh = mesh
 
-        test, trial = a.arguments()
+        # test, trial = a.arguments()
 
-        V = test.function_space()
-        assert V == trial.function_space()
+        # V = test.function_space()
+        # assert V == trial.function_space()
 
-        dof_section = V._dm.getDefaultSection()
-        dm = mesh._plex
+        # dof_section = V._dm.getDefaultSection()
+        # dm = mesh._plex
 
-        # This includes halo vertices, we might need to filter some out
-        vstart, vend = dm.getDepthStratum(0)
+        # # This includes halo vertices, we might need to filter some out
+        # vstart, vend = dm.getDepthStratum(0)
 
-        # range for cells
-        cstart, cend = dm.getHeightStratum(0)
+        # # range for cells
+        # cstart, cend = dm.getHeightStratum(0)
 
-        patches = []
+        # patches = []
 
-        patch_faces = []
-        # section from plex cells to firedrake cell numbers
-        cell_numbering = mesh._cell_numbering
-        # # section for plex vertices to firedrake vertices
-        # vtx_numbering = mesh._vertex_numbering
-        for v in range(vstart, vend):
-            closure, orientation = dm.getTransitiveClosure(v, useCone=False)
-            cells = closure[numpy.logical_and(cstart <= closure, closure < cend)]
-            # find faces that are on boundary of cell patch
-            scells = set(cells)
-            boundary_faces = []
-            for c in cells:
-                faces = dm.getCone(c)
-                for f in faces:
-                    # Only select faces if they are not on the domain boundary
-                    if dm.getLabelValue("exterior_facets", f) == 1:
-                        continue
-                    f_cells = set(dm.getSupport(f))
-                    if len(f_cells.difference(scells)) > 0:
-                        # One of the cells is not in our patch.
-                        boundary_faces.append(f)
-            patch_faces.append(boundary_faces)
-            # Both of the vertices and cells are in plex numbering,
-            patches.append(numpy.array([cell_numbering.getOffset(c)
-                                        for c in cells], dtype=numpy.int32))
+        # patch_faces = []
+        # # section from plex cells to firedrake cell numbers
+        # cell_numbering = mesh._cell_numbering
+        # # # section for plex vertices to firedrake vertices
+        # # vtx_numbering = mesh._vertex_numbering
+        # for v in range(vstart, vend):
+        #     closure, orientation = dm.getTransitiveClosure(v, useCone=False)
+        #     cells = closure[numpy.logical_and(cstart <= closure, closure < cend)]
+        #     # find faces that are on boundary of cell patch
+        #     scells = set(cells)
+        #     boundary_faces = []
+        #     for c in cells:
+        #         faces = dm.getCone(c)
+        #         for f in faces:
+        #             # Only select faces if they are not on the domain boundary
+        #             if dm.getLabelValue("exterior_facets", f) == 1:
+        #                 continue
+        #             f_cells = set(dm.getSupport(f))
+        #             if len(f_cells.difference(scells)) > 0:
+        #                 # One of the cells is not in our patch.
+        #                 boundary_faces.append(f)
+        #     patch_faces.append(boundary_faces)
+        #     # Both of the vertices and cells are in plex numbering,
+        #     patches.append(numpy.array([cell_numbering.getOffset(c)
+        #                                 for c in cells], dtype=numpy.int32))
 
-        # Have a functionspace V
-        cell_node_map = V.cell_node_map().values
-        # shape (ncell, ndof_per_cell)
+        # # Have a functionspace V
+        # cell_node_map = V.cell_node_map().values
+        # # shape (ncell, ndof_per_cell)
 
-        dof_patches = []
-        glob_patches = []
-        bc_masks = []
-        from functools import partial
-        for patch, faces in zip(patches, patch_faces):
-            local = collections.defaultdict(partial(next, itertools.count()))
-            dof_patch = numpy.empty((len(patch), cell_node_map.shape[-1]),
-                                    dtype=numpy.int32)
-            bc_mask = numpy.zeros(dof_patch.shape, dtype=bool)
-            for i, c in enumerate(patch):
-                for j, dof in enumerate(cell_node_map[c, :]):
-                    dof_patch[i, j] = local[dof]
-                    # Mask out global dirichlet bcs
-                    if dof in self.bc_nodes:
-                        bc_mask[i, j] = True
-            glob_patch = numpy.empty(dof_patch.max() + 1, dtype=numpy.int32)
-            for i, j in numpy.ndindex(dof_patch.shape):
-                glob_patch[dof_patch[i, j]] = cell_node_map[patch[i], j]
+        # dof_patches = []
+        # glob_patches = []
+        # bc_masks = []
+        # from functools import partial
+        # for patch, faces in zip(patches, patch_faces):
+        #     local = collections.defaultdict(partial(next, itertools.count()))
+        #     dof_patch = numpy.empty((len(patch), cell_node_map.shape[-1]),
+        #                             dtype=numpy.int32)
+        #     bc_mask = numpy.zeros(dof_patch.shape, dtype=bool)
+        #     for i, c in enumerate(patch):
+        #         for j, dof in enumerate(cell_node_map[c, :]):
+        #             dof_patch[i, j] = local[dof]
+        #             # Mask out global dirichlet bcs
+        #             if dof in self.bc_nodes:
+        #                 bc_mask[i, j] = True
+        #     glob_patch = numpy.empty(dof_patch.max() + 1, dtype=numpy.int32)
+        #     for i, j in numpy.ndindex(dof_patch.shape):
+        #         glob_patch[dof_patch[i, j]] = cell_node_map[patch[i], j]
 
-            # Mask out dofs on boundary of patch
-            # These are the faces on the boundary that are *not* on
-            # the global domain boundary.
-            for f in faces:
-                closure, _ = dm.getTransitiveClosure(f, useCone=True)
-                for p in closure:
-                    off = dof_section.getOffset(p)
-                    for j in range(dof_section.getDof(p)):
-                        bc_mask[numpy.where(dof_patch == local[off + j])] = True
+        #     # Mask out dofs on boundary of patch
+        #     # These are the faces on the boundary that are *not* on
+        #     # the global domain boundary.
+        #     for f in faces:
+        #         closure, _ = dm.getTransitiveClosure(f, useCone=True)
+        #         for p in closure:
+        #             off = dof_section.getOffset(p)
+        #             for j in range(dof_section.getDof(p)):
+        #                 bc_mask[numpy.where(dof_patch == local[off + j])] = True
 
-            glob_patches.append(glob_patch)
-            dof_patches.append(dof_patch)
-            bc_masks.append(numpy.unique(dof_patch[bc_mask]))
+        #     glob_patches.append(glob_patch)
+        #     dof_patches.append(dof_patch)
+        #     bc_masks.append(numpy.unique(dof_patch[bc_mask]))
 
-        self.patches = patches
-        self.dof_patches = dof_patches
-        self.glob_patches = glob_patches
-        self.bc_patches = bc_masks
-        self.patch_faces = patch_faces
+        # self.patches = patches
+        # self.dof_patches = dof_patches
+        # self.glob_patches = glob_patches
+        # self.bc_patches = bc_masks
+        # self.patch_faces = patch_faces
 
     def P1_operator(self, P1space):
         mapper = ReplaceArguments(TestFunction(P1space),
@@ -319,19 +320,28 @@ forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
 L = forcing*v*dx
 u = Function(V, name="solution")
 
+import time
+
+start = time.time()
 SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
 SCP.compile_kernels()
 
-from impl.patches import get_cell_facet_patches, get_dof_patches
 cells, facets = get_cell_facet_patches(M._plex, M._cell_numbering)
-from IPython import embed; embed()
-import sys
-sys.exit(0)
+dof_patches, glob_patches, bc_patches = get_dof_patches(M._plex, V._dm.getDefaultSection(),
+                                                        V.cell_node_map().values,
+                                                        bcs.nodes,
+                                                        cells,
+                                                        facets)
+
+print 'making patches took', time.time() - start
+# from IPython import embed; embed()
+# import sys
+# sys.exit(0)
 # build the patch matrices
 matrices = []
-for glob_patch in SCP.glob_patches:
-    size = glob_patch.shape[0]
+for i in range(len(glob_patches.offset) - 1):
+    size = glob_patches.offset[i+1] - glob_patches.offset[i]
     matrices.append(DenseMat(size, size))
 
 x = matrices[0]
@@ -348,16 +358,15 @@ callable = mod._fun
 
 coordarg = M.coordinates.dat._data.ctypes.data
 coordmap = M.coordinates.cell_node_map()._values.ctypes.data
-for i in range(len(SCP.patches)):
-    cells = SCP.patches[i]
-    end = cells.shape[0]
-    cells = cells.ctypes.data
+for i in range(len(dof_patches.offset) -1):
+    cell = cells.value[cells.offset[i]:].ctypes.data
+    end = cells.offset[i+1] - cells.offset[i]
     matarg = matrices[i].handle.handle
-    matmap = SCP.dof_patches[i].ctypes.data
-    callable(0, end, cells, matarg, matmap, matmap, coordarg, coordmap)
+    matmap = dof_patches.value[dof_patches.offset[i]:].ctypes.data
+    callable(0, end, cell, matarg, matmap, matmap, coordarg, coordmap)
     matrices[i].handle.assemble()
     # matrices[i].handle.view()
-    matrices[i].handle.zeroRowsColumns(SCP.bc_patches[i])
+    matrices[i].handle.zeroRowsColumns(bc_patches.value[bc_patches.offset[i]:bc_patches.offset[i+1]])
     # print "\n\n"
 
 
@@ -385,14 +394,19 @@ class PatchPC(object):
     def apply(self, pc, x, y):
         y.set(0)
         # Apply y <- PC(x)
-        for ksp, (lx, b), patch_dofs, bc in zip(self.ksps, self.vecs, SCP.glob_patches, SCP.bc_patches):
+        for i in range(len(glob_patches.offset) - 1):
+            ksp = self.ksps[i]
+            lx, b = self.vecs[i]
+            patch_dofs = glob_patches.value[glob_patches.offset[i]:glob_patches.offset[i+1]]
+            bc = bc_patches.value[bc_patches.offset[i]:bc_patches.offset[i+1]]
             b.array[:] = x.array_r[patch_dofs]
             # Homogeneous dirichlet bcs on patch boundary
             # FIXME: Condense bcs nodes out of system entirely
             b.array[bc] = 0
             ksp.solve(b, lx)
-        # This is additive only, should try and do multiplicative as well.
-        for (ly, _), patch_dofs in zip(self.vecs, SCP.glob_patches):
+        for i in range(len(glob_patches.offset) - 1):
+            ly = self.vecs[i][0]
+            patch_dofs = glob_patches.value[glob_patches.offset[i]:glob_patches.offset[i+1]]
             y.array[patch_dofs] += ly.array_r[:]
 
 
