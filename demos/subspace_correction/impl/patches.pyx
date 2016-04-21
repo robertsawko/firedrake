@@ -1,3 +1,4 @@
+import cython
 import numpy
 from collections import namedtuple
 cimport numpy
@@ -26,7 +27,10 @@ class RaggedArray(tuple):
         ret.append("])")
         return "\n".join(ret)
 
-    
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     cdef:
         PetscInt i, j, k, c, ci, v, start, end
@@ -136,6 +140,9 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     return RaggedArray([csr_rows, csr_cells]), RaggedArray([csr_facet_rows, csr_facets])
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
                     numpy.ndarray[numpy.int32_t, ndim=2, mode="c"] cell_node_map,
                     numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] bc_nodes,
@@ -168,11 +175,12 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] global_rows
 
     dof_per_cell = cell_node_map.shape[1]
-    patch_dofs = numpy.empty(csr_cell_rows[-1] * dof_per_cell, dtype=numpy.int32)
+    idx = len(csr_cell_rows) - 1
+    patch_dofs = numpy.empty(csr_cell_rows[idx] * dof_per_cell, dtype=numpy.int32)
     patch_rows = numpy.empty_like(csr_cell_rows)
     global_dofs = numpy.empty(1 + dof_per_cell*csr_cell_rows.shape[0], dtype=numpy.int32)
     global_rows = numpy.empty_like(csr_cell_rows)
-    bc_dofs = numpy.empty(1 + csr_cell_rows[-1], dtype=numpy.int32)
+    bc_dofs = numpy.empty(1 + csr_cell_rows[idx], dtype=numpy.int32)
     bc_rows = numpy.empty_like(csr_cell_rows)
 
     patch_rows[0] = 0
@@ -275,6 +283,3 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
 
     return RaggedArray([patch_rows, patch_dofs]), RaggedArray([global_rows, global_dofs]), \
         RaggedArray([bc_rows, bc_dofs])
-                
-
-                    
