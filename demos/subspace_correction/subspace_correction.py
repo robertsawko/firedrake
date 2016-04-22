@@ -303,7 +303,10 @@ V = FunctionSpace(M, "CG", k)
 bcs = DirichletBC(V, 0, (1, 2, 3, 4)) # , 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
-a = inner(grad(u), grad(v))*dx
+eps = 1
+C = as_tensor([[1, 0],
+               [0, eps]])
+a = inner(C*grad(u), grad(v))*dx
 coords = SpatialCoordinate(M)
 x = variable(coords[0])
 y = variable(coords[1])
@@ -504,9 +507,7 @@ def get_transfer_kernel(Pk, P1, restriction=True,
 P1 = FunctionSpace(M, "CG", 1)
 
 
-u = TestFunction(P1)
-v = TrialFunction(P1)
-low = inner(grad(u), grad(v))*dx
+low = SCP.P1_operator(P1)
 lowbc = DirichletBC(P1, 0, (1, 2, 3, 4))
 
 lo_op = assemble(low, bcs=lowbc).M.handle
