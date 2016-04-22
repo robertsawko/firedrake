@@ -43,8 +43,7 @@ extension = Extension("impl.patches", sources=["impl/patches.pyx"],
                       include_dirs=include_dirs,
                       libraries=["petsc"],
                       library_dirs=library_dirs,
-                      runtime_library_dirs=library_dirs,
-                      gdb_debug=True)
+                      runtime_library_dirs=library_dirs)
 
 
 os.environ["CC"] = "mpicc"
