@@ -8,7 +8,7 @@ cdef extern from "petsc.h":
     int PetscFree(void*)
     int PetscSortInt(PetscInt,PetscInt[])
 
-cdef extern from "../src/sys/utils/hash.h":
+cdef extern from "petschash.h":
     struct _PetscHashI
     ctypedef _PetscHashI* PetscHashI "PetscHashI"
     ctypedef long PetscHashIIter
