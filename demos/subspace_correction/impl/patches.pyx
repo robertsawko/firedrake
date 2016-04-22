@@ -112,7 +112,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                 DMPlexGetSupport(dm.dm, facets[j], <const PetscInt **>&facet_cells)
                 for k in range(2):
                     iter = kh_get(32, ht, facet_cells[k])
-                    if iter == kh_end(ht):
+                    if iter != kh_end(ht):
                         # Facet's cell is inside patch
                         continue
                     # Cell not in patch, therefore facet on boundary
