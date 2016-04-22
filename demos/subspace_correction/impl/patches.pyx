@@ -43,8 +43,8 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
         PetscInt *facets = NULL
         PetscInt *facet_cells = NULL
         PetscInt fidx = 0
-        PetscHashI ht
-        PetscHashIIter iter = 0, ret = 0
+        hash_t ht
+        khiter_t iter = 0, ret = 0
         DMLabel facet_label
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_rows
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facet_rows
@@ -82,9 +82,9 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     # Guess at how many boundary facets there will be
     csr_facets = numpy.empty(1 + ncell/4, dtype=numpy.int32)
 
-    PetscHashICreate(ht)
+    ht = kh_init(32)
     for v in range(vStart, vEnd):
-        PetscHashIClear(ht)
+        kh_clear(32, ht)
         DMPlexGetTransitiveClosure(dm.dm, v, PETSC_FALSE,
                                    &nclosure, &closure)
         i = 0
@@ -93,7 +93,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
         # Store patch's cells
         for ci in range(nclosure):
             if cStart <= closure[2*ci] < cEnd:
-                PetscHashIPut(ht, closure[2*ci], ret, iter)
+                iter = kh_put(32, ht, closure[2*ci], &ret)
                 csr_cells[start + i] = closure[2*ci]
                 i += 1
 
@@ -111,8 +111,8 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                 # Get the cells incident to the facet (2 of them)
                 DMPlexGetSupport(dm.dm, facets[j], <const PetscInt **>&facet_cells)
                 for k in range(2):
-                    PetscHashIHasKey(ht, facet_cells[k], flg)
-                    if flg:
+                    iter = kh_get(32, ht, facet_cells[k])
+                    if iter == kh_end(ht):
                         # Facet's cell is inside patch
                         continue
                     # Cell not in patch, therefore facet on boundary
@@ -126,7 +126,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                     fidx += 1
                     break
         csr_facet_rows[v - vStart + 1] = fidx
-    PetscHashIDestroy(ht)
+    kh_destroy(32, ht)
     # Truncate
     csr_facets = csr_facets[:fidx].copy()
     for i in range(ncell):
@@ -159,10 +159,8 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
         PetscInt *closure = NULL
         PetscInt *bc_patch = NULL
         PetscBool flg
-        PetscHashI ht
-        PetscHashI global_bcs
-        PetscHashI local_bcs
-        PetscHashIIter iter = 0, ret = 0
+        hash_t ht, global_bcs, local_bcs
+        khiter_t iter = 0, ret = 0
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_cell_rows = cells.offset
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_cells = cells.value
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facet_rows = facets.offset
@@ -187,17 +185,17 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
     global_rows[0] = 0
     bc_rows[0] = 0
 
-    PetscHashICreate(global_bcs)
+    global_bcs = kh_init(32)
     for i in range(bc_nodes.shape[0]):
         bc = bc_nodes[i]
-        PetscHashIPut(global_bcs, bc, ret, iter)
+        iter = kh_put(32, global_bcs, bc, &ret)
 
-    PetscHashICreate(ht)
-    PetscHashICreate(local_bcs)
+    ht = kh_init(32)
+    local_bcs = kh_init(32)
     for p in range(csr_cell_rows.shape[0] - 1):
         # Reset for new patch
-        PetscHashIClear(local_bcs)
-        PetscHashIClear(ht)
+        kh_clear(32, ht)
+        kh_clear(32, local_bcs)
         start = csr_cell_rows[p]
         end = csr_cell_rows[p+1]
         size = 0
@@ -206,17 +204,21 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
             c = csr_cells[i + start]
             for j in range(dof_per_cell):
                 gdof = cell_node_map[c, j]
-                PetscHashIMap(ht, gdof, ldof)
+                ldof = -1
+                iter = kh_get(32, ht, gdof)
+                if iter != kh_end(ht):
+                    ldof = kh_val(ht, iter)
                 if ldof == -1:
                     ldof = size
                     size += 1
-                    PetscHashIAdd(ht, gdof, ldof)
+                    iter = kh_put(32, ht, gdof, &ret)
+                    kh_set_val(ht, iter, ldof)
                 patch_dofs[dofidx] = ldof
                 # This dof is globally a bc, so make it a patch
                 # local bc.
-                PetscHashIHasKey(global_bcs, gdof, flg)
-                if flg:
-                    PetscHashIPut(local_bcs, ldof, ret, iter)
+                iter = kh_get(32, global_bcs, gdof)
+                if iter != kh_end(global_bcs):
+                    iter = kh_put(32, local_bcs, ldof, &ret)
                 dofidx += 1
         patch_rows[p + 1] = dofidx
 
@@ -227,11 +229,13 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
                                        dtype=numpy.int32)
             global_dofs[:tmp.shape[0]] = tmp
 
-        PetscHashIIterBegin(ht, iter)
-        while not PetscHashIIterAtEnd(ht, iter):
-            PetscHashIIterGetKeyVal(ht, iter, gdof, offset)
-            global_dofs[gidx + offset] = gdof
-            PetscHashIIterNext(ht, iter)
+        iter = kh_begin(ht)
+        while iter != kh_end(ht):
+            if kh_exist(ht, iter):
+                gdof = kh_key(ht, iter)
+                offset = kh_val(ht, iter)
+                global_dofs[gidx + offset] = gdof
+            iter += 1
         gidx += size
         global_rows[p + 1] = gidx
 
@@ -248,16 +252,24 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
                     for j in range(size):
                         # All the dofs on the boundary facets are part
                         # of the local bcs
-                        PetscHashIMap(ht, offset + j, ldof)
-                        assert ldof >= 0
-                        PetscHashIPut(local_bcs, ldof, ret, iter)
+                        iter = kh_get(32, ht, offset + j)
+                        if iter != kh_end(ht):
+                            ldof = kh_val(ht, iter)
+                            iter = kh_put(32, local_bcs, ldof, &ret)
+                        else:
+                            raise RuntimeError
 
         # Allocate bcs data structure
-        PetscHashISize(local_bcs, size)
+        size = kh_size(local_bcs)
         PetscMalloc1(size, &bc_patch)
         j = 0
         # Get the local dofs
-        PetscHashIGetKeys(local_bcs, &j, bc_patch)
+        iter = kh_begin(local_bcs)
+        while iter != kh_end(local_bcs):
+            if kh_exist(local_bcs, iter):
+                bc_patch[j] = kh_key(local_bcs, iter)
+                j += 1
+            iter += 1
         assert j == size
         PetscSortInt(size, bc_patch)
         if bcidx + size >= bc_dofs.shape[0]:
@@ -272,10 +284,9 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
         bc_rows[p + 1] = bcidx
         PetscFree(bc_patch)
 
-        
-    PetscHashIDestroy(local_bcs)
-    PetscHashIDestroy(global_bcs)
-    PetscHashIDestroy(ht)
+    kh_destroy(32, local_bcs)
+    kh_destroy(32, global_bcs)
+    kh_destroy(32, ht)
     global_dofs = global_dofs[:gidx].copy()
     bc_dofs = bc_dofs[:bcidx].copy()
     if closure != NULL:

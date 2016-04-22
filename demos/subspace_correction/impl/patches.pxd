@@ -8,23 +8,25 @@ cdef extern from "petsc.h":
     int PetscFree(void*)
     int PetscSortInt(PetscInt,PetscInt[])
 
-cdef extern from "petschash.h":
-    struct _PetscHashI
-    ctypedef _PetscHashI* PetscHashI "PetscHashI"
-    ctypedef long PetscHashIIter
-    void PetscHashICreate(PetscHashI)
-    void PetscHashIClear(PetscHashI)
-    void PetscHashIDestroy(PetscHashI)
-    void PetscHashISize(PetscHashI, PetscInt)
-    void PetscHashIAdd(PetscHashI, PetscInt, PetscInt)
-    void PetscHashIPut(PetscHashI, PetscInt, PetscHashIIter, PetscHashIIter)
-    void PetscHashIMap(PetscHashI, PetscInt, PetscHashIIter)
-    void PetscHashIHasKey(PetscHashI, PetscInt, PetscBool)
-    void PetscHashIIterBegin(PetscHashI, PetscHashIIter)
-    int PetscHashIIterAtEnd(PetscHashI, PetscHashIIter)
-    void PetscHashIIterGetKeyVal(PetscHashI, PetscHashIIter, PetscInt, PetscInt)
-    int PetscHashIGetKeys(PetscHashI, PetscInt *, PetscInt[])
-    void PetscHashIIterNext(PetscHashI, PetscHashIIter)
+cdef extern from "hash.h":
+    ctypedef long khiter_t
+    ctypedef long khint_t
+    struct khash_32_t
+    ctypedef khash_32_t* hash_t
+    hash_t kh_init(int)
+    void kh_destroy(int, hash_t)
+    void kh_clear(int, hash_t)
+    void kh_resize(int, hash_t, int)
+    khiter_t kh_put(int, hash_t, int, khiter_t*)
+    khiter_t kh_get(int, hash_t, int)
+    khiter_t kh_del(int, hash_t, khint_t)
+    int kh_exist(hash_t, khint_t)
+    int kh_key(hash_t, khint_t)
+    int kh_val(hash_t, khint_t)
+    void kh_set_val(hash_t, khiter_t, int)
+    khiter_t kh_begin(hash_t)
+    khiter_t kh_end(hash_t)
+    khint_t kh_size(hash_t)
 
 cdef extern from "petscdmplex.h":
     int DMPlexGetHeightStratum(PETSc.PetscDM,PetscInt,PetscInt*,PetscInt*)
