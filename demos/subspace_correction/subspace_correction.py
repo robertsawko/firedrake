@@ -217,9 +217,16 @@ class SubspaceCorrectionPrec(object):
                            self.V.cell_node_map()),
                           "P1_Pk_mapper")
         mat = op2.Mat(sp, PETSc.ScalarType)
+        matarg = mat(op2.WRITE, (self.P1.cell_node_map(self.P1_bcs)[op2.i[0]],
+                                 self.V.cell_node_map(self.bcs)[op2.i[1]]))
+        # HACK HACK HACK, this seems like it might be a pyop2 bug
+        sh = matarg._block_shape
+        assert len(sh) == 1 and len(sh[0]) == 1 and len(sh[0][0]) == 2
+        a, b = sh[0][0]
+        nsh = (((a*self.P1.dof_dset.cdim, b*self.V.dof_dset.cdim), ), )
+        matarg._block_shape = nsh
         op2.par_loop(self.transfer_kernel(), self.mesh.cell_set,
-                     mat(op2.WRITE, (self.P1.cell_node_map(self.P1_bcs)[op2.i[0]],
-                                     self.V.cell_node_map(self.bcs)[op2.i[1]])))
+                     matarg)
         mat.assemble()
         mat._force_evaluation()
         return mat.handle
@@ -308,8 +315,15 @@ L = int(sys.argv[1])
 k = int(sys.argv[2])
 M = RectangleMesh(L, L, 2.0, 2.0)
 M.coordinates.dat.data[:] -= 1
-V = FunctionSpace(M, "CG", k)
-bcs = DirichletBC(V, 0, (1, 2, 3, 4)) # , 5, 6))
+scalar = False
+if scalar:
+    V = FunctionSpace(M, "CG", k)
+    bcval = 0
+else:
+    V = VectorFunctionSpace(M, "CG", k)
+    bcval = (0, 0)
+
+bcs = DirichletBC(V, bcval, (1, 2, 3, 4)) # , 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
 eps = 1
@@ -325,7 +339,11 @@ cx = cos(pi*x)
 cy = cos(pi*y)
 xx = x*x
 yy = y*y
-exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
+
+if scalar:
+    exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
+else:
+    exact_expr = as_vector([sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy)), 0])
 
 forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
 
