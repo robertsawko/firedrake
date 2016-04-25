@@ -165,14 +165,17 @@ class SubspaceCorrectionPrec(object):
 # Fake up some PyOP2 objects so we can abuse the PyOP2 code
 # compilation pipeline to get a callable function pointer for
 # assembling into a dense matrix.
-# FIXME: Not correct for VectorElement yet.
+# FIXME: Not correct for MixedElement yet.
 class DenseSparsity(object):
-    def __init__(self, nrows, ncols):
+    def __init__(self, rset, cset):
+        if isinstance(rset, op2.MixedDataSet) or isinstance(cset, op2.MixedDataSet):
+            raise NotImplementedError
         self.shape = (1, 1)
-        self._nrows = nrows
-        self._ncols = ncols
-        self._dims = (((1, 1), ), )
+        self._nrows = rset.size
+        self._ncols = cset.size
+        self._dims = (((rset.cdim, cset.cdim), ), )
         self.dims = self._dims
+        self.dsets = rset, cset
 
     def __getitem__(self, *args):
         return self
@@ -185,9 +188,11 @@ class MatArg(seq.Arg):
         self._idx = idx
         self._access = access
         self._flatten = flatten
-        self._block_shape = tuple(tuple((mr.arity, mc.arity)
-                                        for mc in map[1])
-                                  for mr in map[0])
+        rdims = tuple(d.cdim for d in data.sparsity.dsets[0])
+        cdims = tuple(d.cdim for d in data.sparsity.dsets[1])
+        self._block_shape = tuple(tuple((mr.arity * dr, mc.arity * dc)
+                                        for mc, dc in zip(map[1], cdims))
+                                  for mr, dr in zip(map[0], rdims))
         self.cache_key = None
 
     def c_addto(self, i, j, buf_name, tmp_name, tmp_decl,
@@ -267,15 +272,17 @@ class MatArg(seq.Arg):
 
 
 class DenseMat(pyop2.Mat):
-    def __init__(self, nrows, ncols):
+    def __init__(self, rset, cset):
         mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
+        nrows = rset.cdim * rset.size
+        ncols = cset.cdim * cset.size
         mat.setSizes(((nrows, nrows), (ncols, ncols)),
-                     bsize=1)
+                     bsize=(rset.cdim, cset.cdim))
         mat.setType(mat.Type.DENSE)
         mat.setOptionsPrefix("scp_")
         mat.setFromOptions()
         mat.setUp()
-        self._sparsity = DenseSparsity(nrows, ncols)
+        self._sparsity = DenseSparsity(rset, cset)
         self.handle = mat
         self.dtype = numpy.dtype(PETSc.ScalarType)
 
@@ -344,11 +351,11 @@ print 'making patches took', time.time() - start
 # build the patch matrices
 matrices = []
 for i in range(len(glob_patches.offset) - 1):
-    size = glob_patches.offset[i+1] - glob_patches.offset[i]
-    matrices.append(DenseMat(size, size))
+    size = (glob_patches.offset[i+1] - glob_patches.offset[i])
+    matrices.append(DenseMat(V.dof_dset, V.dof_dset))
 
 x = matrices[0]
-matarg = x(op2.INC, (u.cell_node_map()[op2.i[0]], v.cell_node_map()[op2.i[1]]))
+matarg = x(op2.INC, (u.cell_node_map()[op2.i[0]], v.cell_node_map()[op2.i[1]]), flatten=True)
 matarg.position = 0
 
 # No coefficients yet
