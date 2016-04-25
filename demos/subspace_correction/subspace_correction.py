@@ -189,10 +189,10 @@ class SubspaceCorrectionPrec(object):
         j = gem.Index()
         pre = [i]
         post = [j]
+        extra = []
         for _ in Vin.shape:
-            pre.append(gem.Index())
-            post.append(gem.Index())
-        indices = pre + post
+            extra.append(gem.Index())
+        indices = pre + extra + post + extra
 
         indices = tuple(indices)
         outgem = [gem.Indexed(gem.Variable("A", shape), indices)]
@@ -251,7 +251,7 @@ class PatchPC(object):
             comm = pc.comm
 
         PETSc.Sys.Print("Vertex-patch preconditioner, all subsolves identical", comm=comm)
-        self.ksps.view(viewer)
+        self.ksp.view(viewer)
 
     def apply(self, pc, x, y):
         y.set(0)
