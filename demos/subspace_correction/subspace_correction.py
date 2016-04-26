@@ -1,21 +1,19 @@
+from __future__ import absolute_import
 from firedrake import *
+from firedrake import utils
 from firedrake.petsc import PETSc
-from pyop2 import base as pyop2
-from pyop2 import sequential as seq
+from impl import sscutils
 import numpy
-import collections
-import itertools
-import functools
 
 import ufl
 from ufl.algorithms import map_integrands, MultiFunction
 from impl.patches import get_cell_facet_patches, get_dof_patches
 
 
-class ReplaceArguments(MultiFunction):
+class ArgumentReplacer(MultiFunction):
     def __init__(self, test, trial):
         self.args = {0: test, 1: trial}
-        super(ReplaceArguments, self).__init__()
+        super(ArgumentReplacer, self).__init__()
 
     expr = MultiFunction.reuse_if_untouched
 
@@ -36,117 +34,65 @@ class SubspaceCorrectionPrec(object):
 
     def __init__(self, a, bcs=None):
         self.a = a
-        # if bcs is None:
-        #     bcs = ()
-        # try:
-        #     bcs = tuple(bcs)
-        # except TypeError:
-        #     bcs = (bcs, )
-        # nodes = set()
-        # for bc in bcs:
-        #     nodes.update(bc.nodes)
-        # self.bc_nodes = nodes
+        mesh = a.ufl_domain()
+        self.mesh = mesh
+        test, trial = a.arguments()
+        V = test.function_space()
+        assert V == trial.function_space()
+        self.V = V
+        if V.rank == 0:
+            self.P1 = FunctionSpace(mesh, "CG", 1)
+        elif V.rank == 1:
+            assert len(V.shape) == 1
+            self.P1 = VectorFunctionSpace(mesh, "CG", 1, dim=V.shape[0])
+        else:
+            raise NotImplementedError
 
-        # # one phase of the preconditioner involves restricting the problem
-        # # to the patch around each vertex and solving it.  So, we'll need
-        # # to grab that information from the mesh's plex object
-        # mesh = a.ufl_domain()
-        # self.mesh = mesh
+        if bcs is None:
+            self.bcs = ()
+            bcs = numpy.zeros(0, dtype=numpy.int32)
+        else:
+            try:
+                bcs = tuple(bcs)
+            except TypeError:
+                bcs = (bcs, )
+            self.bcs = bcs
+            bcs = numpy.unique(numpy.concatenate([bc.nodes for bc in bcs]))
 
-        # test, trial = a.arguments()
+        dof_section = V._dm.getDefaultSection()
+        dm = mesh._plex
+        cells, facets = get_cell_facet_patches(dm, mesh._cell_numbering)
+        d, g, b = get_dof_patches(dm, dof_section,
+                                  V.cell_node_map().values,
+                                  bcs, cells, facets)
+        self.cells = cells
+        self.facets = facets
+        self.dof_patches = d
+        self.glob_patches = g
+        self.bc_patches = b
 
-        # V = test.function_space()
-        # assert V == trial.function_space()
-
-        # dof_section = V._dm.getDefaultSection()
-        # dm = mesh._plex
-
-        # # This includes halo vertices, we might need to filter some out
-        # vstart, vend = dm.getDepthStratum(0)
-
-        # # range for cells
-        # cstart, cend = dm.getHeightStratum(0)
-
-        # patches = []
-
-        # patch_faces = []
-        # # section from plex cells to firedrake cell numbers
-        # cell_numbering = mesh._cell_numbering
-        # # # section for plex vertices to firedrake vertices
-        # # vtx_numbering = mesh._vertex_numbering
-        # for v in range(vstart, vend):
-        #     closure, orientation = dm.getTransitiveClosure(v, useCone=False)
-        #     cells = closure[numpy.logical_and(cstart <= closure, closure < cend)]
-        #     # find faces that are on boundary of cell patch
-        #     scells = set(cells)
-        #     boundary_faces = []
-        #     for c in cells:
-        #         faces = dm.getCone(c)
-        #         for f in faces:
-        #             # Only select faces if they are not on the domain boundary
-        #             if dm.getLabelValue("exterior_facets", f) == 1:
-        #                 continue
-        #             f_cells = set(dm.getSupport(f))
-        #             if len(f_cells.difference(scells)) > 0:
-        #                 # One of the cells is not in our patch.
-        #                 boundary_faces.append(f)
-        #     patch_faces.append(boundary_faces)
-        #     # Both of the vertices and cells are in plex numbering,
-        #     patches.append(numpy.array([cell_numbering.getOffset(c)
-        #                                 for c in cells], dtype=numpy.int32))
-
-        # # Have a functionspace V
-        # cell_node_map = V.cell_node_map().values
-        # # shape (ncell, ndof_per_cell)
-
-        # dof_patches = []
-        # glob_patches = []
-        # bc_masks = []
-        # from functools import partial
-        # for patch, faces in zip(patches, patch_faces):
-        #     local = collections.defaultdict(partial(next, itertools.count()))
-        #     dof_patch = numpy.empty((len(patch), cell_node_map.shape[-1]),
-        #                             dtype=numpy.int32)
-        #     bc_mask = numpy.zeros(dof_patch.shape, dtype=bool)
-        #     for i, c in enumerate(patch):
-        #         for j, dof in enumerate(cell_node_map[c, :]):
-        #             dof_patch[i, j] = local[dof]
-        #             # Mask out global dirichlet bcs
-        #             if dof in self.bc_nodes:
-        #                 bc_mask[i, j] = True
-        #     glob_patch = numpy.empty(dof_patch.max() + 1, dtype=numpy.int32)
-        #     for i, j in numpy.ndindex(dof_patch.shape):
-        #         glob_patch[dof_patch[i, j]] = cell_node_map[patch[i], j]
-
-        #     # Mask out dofs on boundary of patch
-        #     # These are the faces on the boundary that are *not* on
-        #     # the global domain boundary.
-        #     for f in faces:
-        #         closure, _ = dm.getTransitiveClosure(f, useCone=True)
-        #         for p in closure:
-        #             off = dof_section.getOffset(p)
-        #             for j in range(dof_section.getDof(p)):
-        #                 bc_mask[numpy.where(dof_patch == local[off + j])] = True
-
-        #     glob_patches.append(glob_patch)
-        #     dof_patches.append(dof_patch)
-        #     bc_masks.append(numpy.unique(dof_patch[bc_mask]))
-
-        # self.patches = patches
-        # self.dof_patches = dof_patches
-        # self.glob_patches = glob_patches
-        # self.bc_patches = bc_masks
-        # self.patch_faces = patch_faces
-
-    def P1_operator(self, P1space):
-        mapper = ReplaceArguments(TestFunction(P1space),
-                                  TrialFunction(P1space))
+    @utils.cached_property
+    def P1_form(self):
+        mapper = ArgumentReplacer(TestFunction(self.P1),
+                                  TrialFunction(self.P1))
         return map_integrands.map_integrand_dags(mapper, self.a)
 
-    def compile_kernels(self):
+    @utils.cached_property
+    def P1_bcs(self):
+        bcs = []
+        for bc in self.bcs:
+            val = Function(self.P1)
+            val.interpolate(as_ufl(bc.function_arg))
+            bcs.append(DirichletBC(self.P1, val, bc.sub_domain, method=bc.method))
+        return tuple(bcs)
+
+    @utils.cached_property
+    def P1_op(self):
+        return assemble(self.P1_form, bcs=self.P1_bcs).M.handle
+
+    @utils.cached_property
+    def kernels(self):
         from firedrake.tsfc_interface import compile_form
-        from pyop2.compilation import load
-        import ctypes
         kernels = compile_form(self.a, "subspace_form")
         compiled_kernels = []
         for k in kernels:
@@ -159,155 +105,225 @@ class SubspaceCorrectionPrec(object):
 
             kernel = kinfo.kernel
             compiled_kernels.append(kernel)
-        self.kernels = compiled_kernels
+        return tuple(compiled_kernels)
+
+    @utils.cached_property
+    def matrix_callable(self):
+        return sscutils.matrix_callable(self.kernels, self.V, self.mesh.coordinates)
+
+    @utils.cached_property
+    def matrices(self):
+        mats = []
+        dim = V.dof_dset.cdim
+        coords = self.mesh.coordinates
+        carg = coords.dat._data.ctypes.data
+        cmap = coords.cell_node_map()._values.ctypes.data
+        for i in range(len(self.dof_patches.offset) - 1):
+            mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
+            size = (self.glob_patches.offset[i+1] - self.glob_patches.offset[i])*dim
+            mat.setSizes(((size, size), (size, size)),
+                         bsize=dim)
+            mat.setType(mat.Type.DENSE)
+            mat.setOptionsPrefix("scp_")
+            mat.setFromOptions()
+            mat.setUp()
+            marg = mat.handle
+            mmap = self.dof_patches.value[self.dof_patches.offset[i]:].ctypes.data
+            cells = self.cells.value[self.cells.offset[i]:].ctypes.data
+            end = self.cells.offset[i+1] - self.cells.offset[i]
+            self.matrix_callable(0, end, cells, marg, mmap, mmap, carg, cmap)
+            mat.assemble()
+            mat.zeroRowsColumns(self.bc_patches.value[self.bc_patches.offset[i]:self.bc_patches.offset[i+1]])
+            mats.append(mat)
+        return tuple(mats)
+
+    def transfer_kernel(self, restriction=True):
+        """Compile a kernel that will map between Pk and P1.
+
+        :kwarg restriction: If True compute a restriction operator, if
+             False, a prolongation operator.
+        :returns: a PyOP2 kernel.
+
+        The prolongation maps a solution in P1 into Pk using the natural
+        embedding.  The restriction maps a residual in the dual of Pk into
+        the dual of P1 (it is the dual of the prolongation), computed
+        using linearity of the test function.
+        """
+        # Mapping of a residual in Pk into a residual in P1
+        from coffee import base as coffee
+        from tsfc.coffee import generate as generate_coffee, SCALAR_TYPE
+        from tsfc.kernel_interface import prepare_coefficient, prepare_arguments
+        from gem import gem, impero_utils as imp
+        import ufl
+        import numpy
+
+        Pk = self.V
+        P1 = self.P1
+        # Pk should be at least the same size as P1
+        assert Pk.fiat_element.space_dimension() >= P1.fiat_element.space_dimension()
+        # In the general case we should compute this by doing:
+        # numpy.linalg.solve(Pkmass, PkP1mass)
+        matrix = numpy.dot(Pk.fiat_element.dual.to_riesz(P1.fiat_element.get_nodal_basis()),
+                           P1.fiat_element.get_coeffs().T).T
+
+        if restriction:
+            Vout, Vin = P1, Pk
+            weights = gem.Literal(matrix)
+            name = "Pk_P1_mapper"
+        else:
+            # Prolongation
+            Vout, Vin = Pk, P1
+            weights = gem.Literal(matrix.T)
+            name = "P1_Pk_mapper"
+
+        funargs = []
+        Pke = Vin.fiat_element
+        P1e = Vout.fiat_element
+
+        assert Vin.shape == Vout.shape
+
+        shape = (P1e.space_dimension(), ) + Vout.shape + (Pke.space_dimension(), ) + Vin.shape
+
+        outarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol("A", rank=shape))
+        i = gem.Index()
+        j = gem.Index()
+        pre = [i]
+        post = [j]
+        extra = []
+        for _ in Vin.shape:
+            extra.append(gem.Index())
+        indices = pre + extra + post + extra
+
+        indices = tuple(indices)
+        outgem = [gem.Indexed(gem.Variable("A", shape), indices)]
+
+        funargs.append(outarg)
+
+        exprs = [gem.Indexed(weights, (i, j))]
+
+        ir = imp.compile_gem(outgem, exprs, indices)
+
+        body = generate_coffee(ir, {})
+        function = coffee.FunDecl("void", name, funargs, body,
+                                  pred=["static", "inline"])
+
+        return op2.Kernel(function, name=function.name)
+
+    @utils.cached_property
+    def transfer_op(self):
+        sp = op2.Sparsity((self.P1.dof_dset,
+                           self.V.dof_dset),
+                          (self.P1.cell_node_map(),
+                           self.V.cell_node_map()),
+                          "P1_Pk_mapper")
+        mat = op2.Mat(sp, PETSc.ScalarType)
+        matarg = mat(op2.WRITE, (self.P1.cell_node_map(self.P1_bcs)[op2.i[0]],
+                                 self.V.cell_node_map(self.bcs)[op2.i[1]]))
+        # HACK HACK HACK, this seems like it might be a pyop2 bug
+        sh = matarg._block_shape
+        assert len(sh) == 1 and len(sh[0]) == 1 and len(sh[0][0]) == 2
+        a, b = sh[0][0]
+        nsh = (((a*self.P1.dof_dset.cdim, b*self.V.dof_dset.cdim), ), )
+        matarg._block_shape = nsh
+        op2.par_loop(self.transfer_kernel(), self.mesh.cell_set,
+                     matarg)
+        mat.assemble()
+        mat._force_evaluation()
+        return mat.handle
 
 
-# Fake up some PyOP2 objects so we can abuse the PyOP2 code
-# compilation pipeline to get a callable function pointer for
-# assembling into a dense matrix.
-# FIXME: Not correct for MixedElement yet.
-class DenseSparsity(object):
-    def __init__(self, rset, cset):
-        if isinstance(rset, op2.MixedDataSet) or isinstance(cset, op2.MixedDataSet):
-            raise NotImplementedError
-        self.shape = (1, 1)
-        self._nrows = rset.size
-        self._ncols = cset.size
-        self._dims = (((rset.cdim, cset.cdim), ), )
-        self.dims = self._dims
-        self.dsets = rset, cset
+class PatchPC(object):
 
-    def __getitem__(self, *args):
-        return self
+    def setUp(self, pc):
+        A, P = pc.getOperators()
+        ctx = P.getPythonContext()
+        ksp = PETSc.KSP().create()
+        pfx = pc.getOptionsPrefix()
+        ksp.setOptionsPrefix(pfx + "sub_")
+        ksp.setFromOptions()
+        self.ksp = ksp
+        self.ctx = ctx
 
+    def view(self, pc, viewer=None):
+        if viewer is not None:
+            comm = viewer.comm
+        else:
+            comm = pc.comm
 
-class MatArg(seq.Arg):
-    def __init__(self, data, map, idx, access, flatten):
-        self.data = data
-        self._map = map
-        self._idx = idx
-        self._access = access
-        self._flatten = flatten
-        rdims = tuple(d.cdim for d in data.sparsity.dsets[0])
-        cdims = tuple(d.cdim for d in data.sparsity.dsets[1])
-        self._block_shape = tuple(tuple((mr.arity * dr, mc.arity * dc)
-                                        for mc, dc in zip(map[1], cdims))
-                                  for mr, dr in zip(map[0], rdims))
-        self.cache_key = None
+        PETSc.Sys.Print("Vertex-patch preconditioner, all subsolves identical", comm=comm)
+        self.ksp.view(viewer)
 
-    def c_addto(self, i, j, buf_name, tmp_name, tmp_decl,
-                extruded=None, is_facet=False, applied_blas=False):
-        # Override global c_addto to index the map locally rather than globally.
-        from pyop2.utils import as_tuple
-        maps = as_tuple(self.map, op2.Map)
-        nrows = maps[0].split[i].arity
-        ncols = maps[1].split[j].arity
-        rows_str = "%s + n * %s" % (self.c_map_name(0, i), nrows)
-        cols_str = "%s + n * %s" % (self.c_map_name(1, j), ncols)
+    def apply(self, pc, x, y):
+        y.set(0)
+        # Apply y <- PC(x)
+        tmp_ys = []
+        ctx = self.ctx
+        bsize = ctx.V.dim
+        for i, m in enumerate(ctx.matrices):
+            self.ksp.reset()
+            self.ksp.setOperators(m, m)
+            ly, b = m.createVecs()
+            patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
+            bc_dofs = ctx.bc_patches.value[ctx.bc_patches.offset[i]:ctx.bc_patches.offset[i+1]]
+            b.array.reshape(-1, bsize)[:] = x.array_r.reshape(-1, bsize)[patch_dofs]
+            b.array.reshape(-1, bsize)[bc_dofs] = 0
+            self.ksp.solve(b, ly)
+            tmp_ys.append(ly)
 
-        if extruded is not None:
-            rows_str = extruded + self.c_map_name(0, i)
-            cols_str = extruded + self.c_map_name(1, j)
+        for i, ly in enumerate(tmp_ys):
+            patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
+            y.array.reshape(-1, bsize)[patch_dofs] += ly.array_r.reshape(-1, bsize)[:]
+            
+class P1PC(object):
 
-        if is_facet:
-            nrows *= 2
-            ncols *= 2
+    def setUp(self, pc):
+        self.pc = PETSc.PC().create()
+        self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
+        A, P = pc.getOperators()
+        ctx = P.getPythonContext()
+        op = ctx.P1_op
+        self.pc.setOperators(op, op)
+        self.pc.setUp()
+        self.pc.setFromOptions()
+        self.transfer = ctx.transfer_op
+        self.work1 = self.transfer.createVecLeft()
+        self.work2 = self.transfer.createVecLeft()
 
-        ret = []
-        rbs, cbs = self.data.sparsity[i, j].dims[0][0]
-        rdim = rbs * nrows
-        addto_name = buf_name
-        addto = 'MatSetValues'
-        if self.data._is_vector_field:
-            addto = 'MatSetValuesBlocked'
-            if self._flatten:
-                if applied_blas:
-                    idx = "[(%%(ridx)s)*%d + (%%(cidx)s)]" % rdim
-                else:
-                    idx = "[%(ridx)s][%(cidx)s]"
-                ret = []
-                idx_l = idx % {'ridx': "%d*j + k" % rbs,
-                               'cidx': "%d*l + m" % cbs}
-                idx_r = idx % {'ridx': "j + %d*k" % nrows,
-                               'cidx': "l + %d*m" % ncols}
-                # Shuffle xxx yyy zzz into xyz xyz xyz
-                ret = ["""
-                %(tmp_decl)s;
-                for ( int j = 0; j < %(nrows)d; j++ ) {
-                   for ( int k = 0; k < %(rbs)d; k++ ) {
-                      for ( int l = 0; l < %(ncols)d; l++ ) {
-                         for ( int m = 0; m < %(cbs)d; m++ ) {
-                            %(tmp_name)s%(idx_l)s = %(buf_name)s%(idx_r)s;
-                         }
-                      }
-                   }
-                }""" % {'nrows': nrows,
-                        'ncols': ncols,
-                        'rbs': rbs,
-                        'cbs': cbs,
-                        'idx_l': idx_l,
-                        'idx_r': idx_r,
-                        'buf_name': buf_name,
-                        'tmp_decl': tmp_decl,
-                        'tmp_name': tmp_name}]
-                addto_name = tmp_name
+    def view(self, pc, viewer=None):
+        if viewer is not None:
+            comm = viewer.comm
+        else:
+            comm = pc.comm
 
-            rmap, cmap = maps
-            rdim, cdim = self.data.dims[i][j]
-            if rmap.vector_index is not None or cmap.vector_index is not None:
-                raise NotImplementedError
-        ret.append("""%(addto)s(%(mat)s, %(nrows)s, %(rows)s,
-                                         %(ncols)s, %(cols)s,
-                                         (const PetscScalar *)%(vals)s,
-                                         %(insert)s);""" %
-                   {'mat': self.c_arg_name(i, j),
-                    'vals': addto_name,
-                    'addto': addto,
-                    'nrows': nrows,
-                    'ncols': ncols,
-                    'rows': rows_str,
-                    'cols': cols_str,
-                    'insert': "INSERT_VALUES" if self.access == op2.WRITE else "ADD_VALUES"})
-        return "\n".join(ret)
+        PETSc.Sys.Print("Low-order P1, inner pc follows", comm=comm)
+        self.pc.view(viewer)
 
-
-class DenseMat(pyop2.Mat):
-    def __init__(self, rset, cset):
-        mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
-        nrows = rset.cdim * rset.size
-        ncols = cset.cdim * cset.size
-        mat.setSizes(((nrows, nrows), (ncols, ncols)),
-                     bsize=(rset.cdim, cset.cdim))
-        mat.setType(mat.Type.DENSE)
-        mat.setOptionsPrefix("scp_")
-        mat.setFromOptions()
-        mat.setUp()
-        self._sparsity = DenseSparsity(rset, cset)
-        self.handle = mat
-        self.dtype = numpy.dtype(PETSc.ScalarType)
-
-    def __call__(self, access, path, flatten=False):
-        path_maps = [arg.map for arg in path]
-        path_idxs = [arg.idx for arg in path]
-        return MatArg(self, path_maps, path_idxs, access, flatten)
-
-
-class JITModule(seq.JITModule):
-    @classmethod
-    def _cache_key(cls, *args, **kwargs):
-        # Don't want to cache these anywhere I think.
-        return None
+    def apply(self, pc, x, y):
+        self.work1.set(0)
+        y.set(0)
+        self.transfer.mult(x, self.work1)
+        self.pc.apply(self.work1, self.work2)
+        self.transfer.multTranspose(self.work2, y)
 
 # Works in 3D too!
 
 import sys
 
+if len(sys.argv) < 3:
+    print "Usage: python subspace_correction.py L order [petsc_options]"
 L = int(sys.argv[1])
 k = int(sys.argv[2])
 M = RectangleMesh(L, L, 2.0, 2.0)
 M.coordinates.dat.data[:] -= 1
-V = FunctionSpace(M, "CG", k)
-bcs = DirichletBC(V, 0, (1, 2, 3, 4)) # , 5, 6))
+scalar = False
+if scalar:
+    V = FunctionSpace(M, "CG", k)
+    bcval = 0
+else:
+    V = VectorFunctionSpace(M, "CG", k)
+    bcval = (0, 0)
+
+bcs = DirichletBC(V, bcval, (1, 2, 3, 4)) # , 5, 6))
 u = TrialFunction(V)
 v = TestFunction(V)
 eps = 1
@@ -323,11 +339,15 @@ cx = cos(pi*x)
 cy = cos(pi*y)
 xx = x*x
 yy = y*y
-exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
+
+if scalar:
+    exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
+else:
+    exact_expr = as_vector([sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy)), 0])
 
 forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
 
-L = forcing*v*dx
+L = inner(forcing, v)*dx
 u = Function(V, name="solution")
 
 import time
@@ -335,205 +355,8 @@ import time
 start = time.time()
 SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
-SCP.compile_kernels()
-
-cells, facets = get_cell_facet_patches(M._plex, M._cell_numbering)
-dof_patches, glob_patches, bc_patches = get_dof_patches(M._plex, V._dm.getDefaultSection(),
-                                                        V.cell_node_map().values,
-                                                        bcs.nodes,
-                                                        cells,
-                                                        facets)
-
 print 'making patches took', time.time() - start
-# from IPython import embed; embed()
-# import sys
-# sys.exit(0)
-# build the patch matrices
-matrices = []
-for i in range(len(glob_patches.offset) - 1):
-    size = (glob_patches.offset[i+1] - glob_patches.offset[i])
-    matrices.append(DenseMat(V.dof_dset, V.dof_dset))
-
-x = matrices[0]
-matarg = x(op2.INC, (u.cell_node_map()[op2.i[0]], v.cell_node_map()[op2.i[1]]), flatten=True)
-matarg.position = 0
-
-# No coefficients yet
-coordarg = M.coordinates.dat(op2.READ, M.coordinates.cell_node_map(), flatten=True)
-coordarg.position = 1
-itspace = pyop2.build_itspace([matarg, coordarg], op2.Subset(M.cell_set, [0]))
-kernel = SCP.kernels[0]
-mod = JITModule(kernel, itspace, matarg, coordarg)
-callable = mod._fun
-
-coordarg = M.coordinates.dat._data.ctypes.data
-coordmap = M.coordinates.cell_node_map()._values.ctypes.data
-for i in range(len(dof_patches.offset) -1):
-    cell = cells.value[cells.offset[i]:].ctypes.data
-    end = cells.offset[i+1] - cells.offset[i]
-    matarg = matrices[i].handle.handle
-    matmap = dof_patches.value[dof_patches.offset[i]:].ctypes.data
-    callable(0, end, cell, matarg, matmap, matmap, coordarg, coordmap)
-    matrices[i].handle.assemble()
-    # matrices[i].handle.view()
-    matrices[i].handle.zeroRowsColumns(bc_patches.value[bc_patches.offset[i]:bc_patches.offset[i+1]])
-    # print "\n\n"
-
-
-class PatchPC(object):
-
-    def setUp(self, pc):
-        self.ksps = [PETSc.KSP().create() for _ in matrices]
-        self.vecs = []
-        pfx = pc.getOptionsPrefix()
-        for ksp, mat in zip(self.ksps, matrices):
-            ksp.setOperators(mat.handle, mat.handle)
-            ksp.setOptionsPrefix(pfx + "sub_")
-            ksp.setFromOptions()
-            self.vecs.append(mat.handle.createVecs())
-
-    def view(self, pc, viewer=None):
-        if viewer is not None:
-            comm = viewer.comm
-        else:
-            comm = pc.comm
-
-        PETSc.Sys.Print("Vertex-patch preconditioner, all subsolves identical", comm=comm)
-        self.ksps[0].view(viewer)
-
-    def apply(self, pc, x, y):
-        y.set(0)
-        # Apply y <- PC(x)
-        for i in range(len(glob_patches.offset) - 1):
-            ksp = self.ksps[i]
-            lx, b = self.vecs[i]
-            patch_dofs = glob_patches.value[glob_patches.offset[i]:glob_patches.offset[i+1]]
-            bc = bc_patches.value[bc_patches.offset[i]:bc_patches.offset[i+1]]
-            b.array[:] = x.array_r[patch_dofs]
-            # Homogeneous dirichlet bcs on patch boundary
-            # FIXME: Condense bcs nodes out of system entirely
-            b.array[bc] = 0
-            ksp.solve(b, lx)
-        for i in range(len(glob_patches.offset) - 1):
-            ly = self.vecs[i][0]
-            patch_dofs = glob_patches.value[glob_patches.offset[i]:glob_patches.offset[i+1]]
-            y.array[patch_dofs] += ly.array_r[:]
-
-
 numpy.set_printoptions(linewidth=200, precision=4)
-
-# # diag = A.M.values.diagonal()
-# # print residual.dat.data_ro / diag
-
-# exact = Function(V)
-# solve(a == L, exact, bcs=bcs)
-
-# print norm(assemble(exact - u))
-# print u.dat.data_ro
-# Pk -> P1 restriction on reference element
-# np.dot(np.dot(P2.dual.to_riesz(P1.get_nodal_basis()), P1.get_coeffs().T).T, P2_residual)
-# Generally:
-# np.linalg.solve(Pkmass, PkP1mass)
-
-
-def get_transfer_kernel(Pk, P1, restriction=True,
-                        matrix_kernel=True):
-    """Compile a kernel that will map between Pk and P1.
-
-    :arg Pk: The high order Pk space (a FunctionSpace).
-    :arg P1: The P1 space on the same mesh (a FunctionSpace).
-    :kwarg restriction: If True compute a restriction operator, if
-         False, a prolongation operator.
-    :kwarg matrix_kernel: If True, return an operator that computes a
-         element matrix, otherwise an operator to do the transfer
-         matrix free.
-    :returns: a COFFEE FunDecl object.
-
-    The prolongation maps a solution in P1 into Pk using the natural
-    embedding.  The restriction maps a residual in the dual of Pk into
-    the dual of P1 (it is the dual of the prolongation), computed
-    using linearity of the test function.
-    """
-    # Mapping of a residual in Pk into a residual in P1
-    from coffee import base as coffee
-    from tsfc.coffee import generate as generate_coffee
-    from tsfc.kernel_interface import prepare_coefficient, prepare_arguments
-    from gem import gem, impero_utils as imp
-    import ufl
-    import numpy
-
-    # Pk should be at least the same size as P1
-    assert Pk.fiat_element.space_dimension() >= P1.fiat_element.space_dimension()
-    # In the general case we should compute this by doing:
-    # numpy.linalg.solve(Pkmass, PkP1mass)
-    matrix = numpy.dot(Pk.fiat_element.dual.to_riesz(P1.fiat_element.get_nodal_basis()),
-                       P1.fiat_element.get_coeffs().T).T
-
-    if restriction:
-        Vout, Vin = P1, Pk
-        weights = gem.Literal(matrix)
-        name = "Pk_P1_mapper"
-    else:
-        # Prolongation
-        Vout, Vin = Pk, P1
-        weights = gem.Literal(matrix.T)
-        name = "P1_Pk_mapper"
-
-    i = gem.Index("i")
-    j = gem.Index("j")
-
-    funargs = []
-    if matrix_kernel:
-        outarg, prepare, outgem, finalise = prepare_arguments((ufl.TestFunction(Vout),
-                                                               ufl.TrialFunction(Vin)),
-                                                              (i, j), False)
-    else:
-        outarg, prepare, outgem, finalise = prepare_arguments((ufl.TestFunction(Vout), )
-                                                              (i, ), False)
-    assert len(prepare) == 0
-    assert len(finalise) == 0
-    funargs.append(outarg)
-
-    if matrix_kernel:
-        exprs = [gem.Indexed(weights, (i, j))]
-    else:
-        inarg, prepare, ingem = prepare_coefficient(ufl.Coefficient(Vin), "input")
-        assert len(prepare) == 0
-        funargs.append(inarg)
-        exprs = [gem.IndexSum(gem.Product(gem.Indexed(weights, (i, j)),
-                                          gem.Indexed(ingem, (j, ))), j)]
-
-    ir = imp.compile_gem(outgem, exprs, (i, j))
-
-    body = generate_coffee(ir, {i: i.name, j: j.name})
-    function = coffee.FunDecl("void", name, funargs, body,
-                              pred=["static", "inline"])
-
-    return op2.Kernel(function, name=function.name)
-
-P1 = FunctionSpace(M, "CG", 1)
-
-
-low = SCP.P1_operator(P1)
-lowbc = DirichletBC(P1, 0, (1, 2, 3, 4))
-
-lo_op = assemble(low, bcs=lowbc).M.handle
-
-sp = op2.Sparsity((P1.dof_dset,
-                   V.dof_dset),
-                  (P1.cell_node_map(),
-                   V.cell_node_map()),
-                  "mapper")
-mat = op2.Mat(sp, PETSc.ScalarType)
-
-op2.par_loop(get_transfer_kernel(V, P1), M.cell_set,
-             mat(op2.WRITE, (P1.cell_node_map([lowbc])[op2.i[0]],
-                             V.cell_node_map([bcs])[op2.i[1]])))
-
-mat.assemble()
-mat._force_evaluation()
-transfer = mat.handle
-
 
 # Needs to be composed with something else to do the high order
 # smoothing.  Otherwise we get into a situation where the residual in
@@ -564,56 +387,6 @@ transfer = mat.handle
 #     -sub_0_sub_pc_type lu \
 #     -sub_1_pc_python_type __main__.P1PC \
 #     -sub_1_lo_pc_type lu
-class P1PC(object):
-
-    def setUp(self, pc):
-        self.pc = PETSc.PC().create()
-        self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
-        self.pc.setOperators(lo_op, lo_op)
-        self.pc.setUp()
-        self.pc.setFromOptions()
-
-    def view(self, pc, viewer=None):
-        if viewer is not None:
-            comm = viewer.comm
-        else:
-            comm = pc.comm
-
-        PETSc.Sys.Print("Low-order P1, inner pc follows", comm=comm)
-        self.pc.view(viewer)
-
-    def apply(self, pc, x, y):
-        l = transfer.createVecLeft()
-        transfer.mult(x, l)
-        tmp = l.duplicate()
-        self.pc.apply(l, tmp)
-        transfer.multTranspose(tmp, y)
-        # Matrix-free would look a little like this
-        # # restrict x to P1
-        # low = Function(P1)
-        # high = Function(V)
-        # with high.dat.vec_ro as v:
-        #     x.copy(v)
-        # print v.array_r
-        # op2.par_loop(get_transfer_kernel(V, P1),
-        #              M.cell_set,
-        #              low.dat(op2.INC, low.cell_node_map()[op2.i[0]],
-        #                      flatten=True),
-        #              high.dat(op2.READ, high.cell_node_map(),
-        #                       flatten=True))
-        # with low.dat.vec as v:
-        #     print v.array_r
-        #     tmp = v.duplicate()
-        #     self.pc.apply(v, tmp)
-        #     tmp.copy(v)
-        # op2.par_loop(get_transfer_kernel(V, P1, restriction=False),
-        #              M.cell_set,
-        #              high.dat(op2.WRITE, high.cell_node_map()[op2.i[0]],
-        #                       flatten=True),
-        #              low.dat(op2.READ, low.cell_node_map(),
-        #                      flatten=True))
-        # with high.dat.vec_ro as v:
-        #     v.copy(y)
 
 
 A = assemble(a, bcs=bcs)
@@ -621,17 +394,22 @@ A = assemble(a, bcs=bcs)
 b = assemble(L)
 
 solver = LinearSolver(A, options_prefix="")
+
+A, P = solver.ksp.getOperators()
+
+# Need to remove this bit if don't use python pcs
+P = PETSc.Mat().create()
+P.setSizes(*A.getSizes())
+P.setType(P.Type.PYTHON)
+P.setPythonContext(SCP)
+P.setUp()
+P.setFromOptions()
+solver.ksp.setOperators(A, P)
+
 u = Function(V, name="solution")
 
 solver.solve(u, b)
 
 exact = Function(V).interpolate(exact_expr)
 diff = assemble(exact - u)
-# diff.rename("difference")
-# exact.rename("exact")
 print norm(diff)
-
-# print u.dat.data_ro
-# File("out.pvd").write(diff, exact, u)
-# File("out.pvd").write(u)
-# print u.dat.data_ro
