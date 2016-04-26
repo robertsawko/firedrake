@@ -133,7 +133,9 @@ class SubspaceCorrectionPrec(object):
             end = self.cells.offset[i+1] - self.cells.offset[i]
             self.matrix_callable(0, end, cells, marg, mmap, mmap, carg, cmap)
             mat.assemble()
-            mat.zeroRowsColumns(self.bc_patches.value[self.bc_patches.offset[i]:self.bc_patches.offset[i+1]])
+            rows = self.bc_patches.value[self.bc_patches.offset[i]:self.bc_patches.offset[i+1]]
+            rows = numpy.dstack([dim*rows + i for i in range(dim)]).flatten()
+            mat.zeroRowsColumns(rows)
             mats.append(mat)
         return tuple(mats)
 
@@ -240,6 +242,7 @@ class PatchPC(object):
         ksp = PETSc.KSP().create()
         pfx = pc.getOptionsPrefix()
         ksp.setOptionsPrefix(pfx + "sub_")
+        ksp.setType(ksp.Type.PREONLY)
         ksp.setFromOptions()
         self.ksp = ksp
         self.ctx = ctx
@@ -263,6 +266,8 @@ class PatchPC(object):
             self.ksp.reset()
             self.ksp.setOperators(m, m)
             ly, b = m.createVecs()
+            ly.set(0)
+            b.set(0)
             patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
             bc_dofs = ctx.bc_patches.value[ctx.bc_patches.offset[i]:ctx.bc_patches.offset[i+1]]
             b.array.reshape(-1, bsize)[:] = x.array_r.reshape(-1, bsize)[patch_dofs]
@@ -273,7 +278,8 @@ class PatchPC(object):
         for i, ly in enumerate(tmp_ys):
             patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
             y.array.reshape(-1, bsize)[patch_dofs] += ly.array_r.reshape(-1, bsize)[:]
-            
+
+
 class P1PC(object):
 
     def setUp(self, pc):
@@ -299,8 +305,9 @@ class P1PC(object):
         self.pc.view(viewer)
 
     def apply(self, pc, x, y):
-        self.work1.set(0)
         y.set(0)
+        self.work1.set(0)
+        self.work2.set(0)
         self.transfer.mult(x, self.work1)
         self.pc.apply(self.work1, self.work2)
         self.transfer.multTranspose(self.work2, y)
@@ -356,7 +363,7 @@ start = time.time()
 SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
 print 'making patches took', time.time() - start
-numpy.set_printoptions(linewidth=200, precision=4)
+numpy.set_printoptions(linewidth=200, precision=5, suppress=True)
 
 # Needs to be composed with something else to do the high order
 # smoothing.  Otherwise we get into a situation where the residual in
