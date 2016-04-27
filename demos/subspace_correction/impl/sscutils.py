@@ -133,15 +133,23 @@ class JITModule(seq.JITModule):
         return None
 
 
-def matrix_callable(kernels, V, coordinates):
-    assert len(kernels) == 1
-    arg = DenseMat(V.dof_dset, V.dof_dset)(op2.INC,
+def matrix_callable(kernels, V, coordinates, *coefficients):
+    kinfo = kernels[0]
+    args = []
+    matarg = DenseMat(V.dof_dset, V.dof_dset)(op2.INC,
                                            (V.cell_node_map()[op2.i[0]],
                                             V.cell_node_map()[op2.i[1]]),
                                            flatten=True)
-    arg.position = 0
+    matarg.position = len(args)
+    args.append(matarg)
     carg = coordinates.dat(op2.READ, coordinates.cell_node_map(), flatten=True)
-    carg.position = 1
-    itspace = pyop2.build_itspace([arg, carg], op2.Subset(coordinates.cell_set, [0]))
-    mod = JITModule(kernels[0], itspace, arg, carg)
+    carg.position = len(args)
+    args.append(carg)
+    for n in kinfo.coefficient_map:
+        c = coefficients[n]
+        arg = c.dat(op2.READ, c.cell_node_map(), flatten=True)
+        arg.position = len(args)
+        args.append(arg)
+    itspace = pyop2.build_itspace(args, op2.Subset(coordinates.cell_set, [0]))
+    mod = JITModule(kinfo.kernel, itspace, *args)
     return mod._fun
