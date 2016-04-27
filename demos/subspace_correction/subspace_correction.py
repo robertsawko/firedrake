@@ -101,15 +101,14 @@ class SubspaceCorrectionPrec(object):
             kinfo = k.kinfo
             assert kinfo.integral_type == "cell"
             assert not kinfo.oriented
-            assert len(kinfo.coefficient_map) == 0
-
-            kernel = kinfo.kernel
-            compiled_kernels.append(kernel)
+            compiled_kernels.append(kinfo)
+        assert len(compiled_kernels) == 1
         return tuple(compiled_kernels)
 
     @utils.cached_property
     def matrix_callable(self):
-        return sscutils.matrix_callable(self.kernels, self.V, self.mesh.coordinates)
+        return sscutils.matrix_callable(self.kernels, self.V, self.mesh.coordinates,
+                                        *self.a.coefficients())
 
     @utils.cached_property
     def matrices(self):
@@ -118,6 +117,12 @@ class SubspaceCorrectionPrec(object):
         coords = self.mesh.coordinates
         carg = coords.dat._data.ctypes.data
         cmap = coords.cell_node_map()._values.ctypes.data
+        coeffs = self.a.coefficients()
+        args = []
+        for n in self.kernels[0].coefficient_map:
+            c = coeffs[n]
+            args.append(c.dat._data.ctypes.data)
+            args.append(c.cell_node_map()._values.ctypes.data)
         for i in range(len(self.dof_patches.offset) - 1):
             mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
             size = (self.glob_patches.offset[i+1] - self.glob_patches.offset[i])*dim
@@ -131,7 +136,7 @@ class SubspaceCorrectionPrec(object):
             mmap = self.dof_patches.value[self.dof_patches.offset[i]:].ctypes.data
             cells = self.cells.value[self.cells.offset[i]:].ctypes.data
             end = self.cells.offset[i+1] - self.cells.offset[i]
-            self.matrix_callable(0, end, cells, marg, mmap, mmap, carg, cmap)
+            self.matrix_callable(0, end, cells, marg, mmap, mmap, carg, cmap, *args)
             mat.assemble()
             rows = self.bc_patches.value[self.bc_patches.offset[i]:self.bc_patches.offset[i+1]]
             rows = numpy.dstack([dim*rows + i for i in range(dim)]).flatten()
