@@ -35,6 +35,7 @@ cdef extern from "petscdmplex.h":
     int DMPlexGetCone(PETSc.PetscDM,PetscInt,PetscInt*[])
     int DMPlexGetConeSize(PETSc.PetscDM,PetscInt,PetscInt*)
     int DMPlexGetSupport(PETSc.PetscDM,PetscInt,PetscInt*[])
+    int DMPlexGetSupportSize(PETSc.PetscDM,PetscInt,PetscInt*)
 
     int DMPlexGetTransitiveClosure(PETSc.PetscDM,PetscInt,PetscBool,PetscInt *,PetscInt *[])
     int DMPlexRestoreTransitiveClosure(PETSc.PetscDM,PetscInt,PetscBool,PetscInt *,PetscInt *[])
