@@ -44,17 +44,13 @@ if scalar:
 else:
     exact_expr = as_vector([sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy)), 0])
 
-forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
+forcing = Constant(1) # -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
 
 L = inner(forcing, v)*dx
 u = Function(V, name="solution")
 
-import time
-
-start = time.time()
 SCP = SubspaceCorrectionPrec(a, bcs=bcs)
 
-print 'making patches took', time.time() - start
 numpy.set_printoptions(linewidth=200, precision=5, suppress=True)
 
 # Needs to be composed with something else to do the high order
@@ -96,6 +92,8 @@ solver = LinearSolver(A, options_prefix="")
 
 A, P = solver.ksp.getOperators()
 
+if PETSc.COMM_WORLD.rank == 0:
+    print repr(SCP.facets)
 # Need to remove this bit if don't use python pcs
 P = PETSc.Mat().create()
 P.setSizes(A.getSizes(), bsize=A.getBlockSizes())
@@ -109,6 +107,6 @@ u = Function(V, name="solution")
 
 solver.solve(u, b)
 
-exact = Function(V).interpolate(exact_expr)
-diff = assemble(exact - u)
-print norm(diff)
+# exact = Function(V).interpolate(exact_expr)
+# diff = assemble(exact - u)
+# print norm(diff)

@@ -28,24 +28,24 @@ class RaggedArray(tuple):
         return "\n".join(ret)
 
 
-@cython.boundscheck(False)
+# @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     cdef:
         PetscInt i, j, k, c, ci, v, start, end
-        PetscInt vStart, vEnd
+        PetscInt vStart, vEnd, nvtx
         PetscInt fStart, fEnd
         PetscInt cStart, cEnd
-        PetscInt nfacet, ncell = 0, nclosure
-        PetscBool flg
+        PetscInt nfacet, ncell = 0, nclosure, nfacet_cell
+        PetscBool flg, flg1, flg2
         PetscInt *closure = NULL
         PetscInt *facets = NULL
         PetscInt *facet_cells = NULL
         PetscInt fidx = 0
         hash_t ht
         khiter_t iter = 0, ret = 0
-        DMLabel facet_label
+        DMLabel facet_label, core, non_core
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_rows
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facet_rows
         numpy.ndarray[numpy.int32_t, ndim=1, mode="c"] csr_facets
@@ -56,16 +56,32 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     fStart, fEnd = dm.getHeightStratum(1)
     cStart, cEnd = dm.getHeightStratum(0)
 
+    
     DMGetLabel(dm.dm, <char *>"exterior_facets", &facet_label)
     DMLabelCreateIndex(facet_label, fStart, fEnd)
+    DMGetLabel(dm.dm, <char *>"op2_core", &core)
+    DMGetLabel(dm.dm, <char *>"op2_non_core", &non_core)
+    start, end = dm.getChart()
+    DMLabelCreateIndex(core, start, end)
+    DMLabelCreateIndex(non_core, start, end)
 
-    csr_rows = numpy.empty(vEnd - vStart + 1, dtype=numpy.int32)
+    nvtx = 0
+    for v in range(vStart, vEnd):
+        DMLabelHasPoint(core, v, &flg1)
+        DMLabelHasPoint(non_core, v, &flg2)
+        if flg1 or flg2:
+            nvtx += 1
+    csr_rows = numpy.empty(nvtx + 1, dtype=numpy.int32)
     csr_rows[0] = 0
 
     # Count number of cells per patch
     # This needs to change if we want a different determination of a
     # "patch".
     for v in range(vStart, vEnd):
+        DMLabelHasPoint(core, v, &flg1)
+        DMLabelHasPoint(non_core, v, &flg2)
+        if not (flg1 or flg2):
+            continue
         # Get iterated support of the vertex (star)
         DMPlexGetTransitiveClosure(dm.dm, v, PETSC_FALSE,
                                    &nclosure, &closure)
@@ -77,13 +93,17 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
 
     # Allocate cells
     csr_cells = numpy.empty(ncell, dtype=numpy.int32)
-    csr_facet_rows = numpy.empty(vEnd - vStart + 1, dtype=numpy.int32)
+    csr_facet_rows = numpy.empty(nvtx + 1, dtype=numpy.int32)
     csr_facet_rows[0] = 0
     # Guess at how many boundary facets there will be
     csr_facets = numpy.empty(1 + ncell/4, dtype=numpy.int32)
 
     ht = kh_init(32)
     for v in range(vStart, vEnd):
+        DMLabelHasPoint(core, v, &flg1)
+        DMLabelHasPoint(non_core, v, &flg2)
+        if not (flg1 or flg2):
+            continue
         kh_clear(32, ht)
         DMPlexGetTransitiveClosure(dm.dm, v, PETSC_FALSE,
                                    &nclosure, &closure)
@@ -110,12 +130,22 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                     continue
                 # Get the cells incident to the facet (2 of them)
                 DMPlexGetSupport(dm.dm, facets[j], <const PetscInt **>&facet_cells)
-                for k in range(2):
-                    iter = kh_get(32, ht, facet_cells[k])
-                    if iter != kh_end(ht):
-                        # Facet's cell is inside patch
-                        continue
-                    # Cell not in patch, therefore facet on boundary
+                DMPlexGetSupportSize(dm.dm, facets[j], &nfacet_cell)
+                # On process boundary, therefore also on subdomain
+                # boundary if we only have one cell.
+                flg = PETSC_TRUE
+                if nfacet == 1:
+                    flg = PETSC_FALSE
+                if flg:
+                    for k in range(nfacet_cell):
+                        iter = kh_get(32, ht, facet_cells[k])
+                        if iter != kh_end(ht):
+                            # Facet's cell is inside patch
+                            continue
+                        flg = PETSC_FALSE
+                        break
+                # Cell not in patch, therefore facet on boundary
+                if flg == PETSC_FALSE:
                     # Realloc if necessary
                     if fidx == csr_facets.shape[0]:
                         tmp = csr_facets
@@ -124,7 +154,6 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                         csr_facets[:fidx] = tmp
                     csr_facets[fidx] = facets[j]
                     fidx += 1
-                    break
         csr_facet_rows[v - vStart + 1] = fidx
     kh_destroy(32, ht)
     # Truncate
@@ -140,7 +169,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     return RaggedArray([csr_rows, csr_cells]), RaggedArray([csr_facet_rows, csr_facets])
 
 
-@cython.boundscheck(False)
+# @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,

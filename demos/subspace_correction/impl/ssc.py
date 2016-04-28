@@ -268,7 +268,20 @@ class PatchPC(object):
         # Apply y <- PC(x)
         tmp_ys = []
         ctx = self.ctx
+        V = ctx.V
         bsize = ctx.V.dim
+        lsize = V.dof_dset.total_size*bsize
+        local = PETSc.Vec().create(comm=PETSc.COMM_SELF)
+        local.setSizes((lsize, lsize), bsize=bsize)
+        local.setUp()
+        local.set(0)
+        dm = V._dm
+
+        # x.view()
+        dm.globalToLocal(x, local, addv=PETSc.InsertMode.INSERT_VALUES)
+        # x.view()
+        # if PETSc.COMM_WORLD.rank == PETSc.COMM_WORLD.size - 1:
+        #     local.view()
         for i, m in enumerate(ctx.matrices):
             self.ksp.reset()
             self.ksp.setOperators(m, m)
@@ -277,15 +290,18 @@ class PatchPC(object):
             b.set(0)
             patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
             bc_dofs = ctx.bc_patches.value[ctx.bc_patches.offset[i]:ctx.bc_patches.offset[i+1]]
-            b.array.reshape(-1, bsize)[:] = x.array_r.reshape(-1, bsize)[patch_dofs]
+            b.array.reshape(-1, bsize)[:] = local.array_r.reshape(-1, bsize)[patch_dofs]
             b.array.reshape(-1, bsize)[bc_dofs] = 0
             self.ksp.solve(b, ly)
             tmp_ys.append(ly)
 
+        local.set(0)
         for i, ly in enumerate(tmp_ys):
             patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
-            y.array.reshape(-1, bsize)[patch_dofs] += ly.array_r.reshape(-1, bsize)[:]
+            local.array.reshape(-1, bsize)[patch_dofs] += ly.array_r.reshape(-1, bsize)[:]
 
+        dm.localToGlobal(local, y, addv=PETSc.InsertMode.ADD_VALUES)
+        # y.view()
 
 class P1PC(object):
 
@@ -296,6 +312,7 @@ class P1PC(object):
         ctx = P.getPythonContext()
         op = ctx.P1_op
         self.pc.setOperators(op, op)
+        self.pc.setOperators(A, A)
         self.pc.setUp()
         self.pc.setFromOptions()
         self.transfer = ctx.transfer_op
@@ -312,10 +329,11 @@ class P1PC(object):
         self.pc.view(viewer)
 
     def apply(self, pc, x, y):
-        y.set(0)
-        self.work1.set(0)
-        self.work2.set(0)
-        self.transfer.mult(x, self.work1)
-        self.pc.apply(self.work1, self.work2)
-        self.transfer.multTranspose(self.work2, y)
+        self.pc.apply(x, y)
+        # y.set(0)
+        # self.work1.set(0)
+        # self.work2.set(0)
+        # self.transfer.mult(x, self.work1)
+        # self.pc.apply(self.work1, self.work2)
+        # self.transfer.multTranspose(self.work2, y)
 
