@@ -40,7 +40,7 @@ a = inner(sigma(u), grad(v))*dx
 
 f = Function(V)
 from numpy import random
-f.dat.data[:,:] = random.randn(*f.dat.shape)
+f.dat.data[:,:] = random.randn(*f.dat.data.shape)
 L = inner(f, v)*dx
 
 u = Function(V, name="solution")
