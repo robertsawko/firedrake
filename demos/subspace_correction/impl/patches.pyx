@@ -12,11 +12,18 @@ class RaggedArray(tuple):
 
     @property
     def offset(self):
-        return self[0]
+        return super(RaggedArray, self).__getitem__(0)
 
     @property
     def value(self):
-        return self[1]
+        return super(RaggedArray, self).__getitem__(1)
+
+    def __len__(self):
+        return self.offset.shape[0] - 1
+
+    def __getitem__(self, i):
+        assert i <= len(self)
+        return self.value[self.offset[i]:self.offset[i+1]]
 
     def __repr__(self):
         ret = ["RaggedArray(["]
@@ -28,7 +35,7 @@ class RaggedArray(tuple):
         return "\n".join(ret)
 
 
-# @cython.boundscheck(False)
+@cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
@@ -43,6 +50,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
         PetscInt *facets = NULL
         PetscInt *facet_cells = NULL
         PetscInt fidx = 0
+        bint boundary_facet
         hash_t ht
         khiter_t iter = 0, ret = 0
         DMLabel facet_label, core, non_core
@@ -133,19 +141,17 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
                 DMPlexGetSupportSize(dm.dm, facets[j], &nfacet_cell)
                 # On process boundary, therefore also on subdomain
                 # boundary if we only have one cell.
-                flg = PETSC_TRUE
-                if nfacet == 1:
-                    flg = PETSC_FALSE
-                if flg:
+                boundary_facet = nfacet_cell == 1
+                if not boundary_facet:
                     for k in range(nfacet_cell):
                         iter = kh_get(32, ht, facet_cells[k])
                         if iter != kh_end(ht):
                             # Facet's cell is inside patch
                             continue
-                        flg = PETSC_FALSE
+                        boundary_facet = True
                         break
                 # Cell not in patch, therefore facet on boundary
-                if flg == PETSC_FALSE:
+                if boundary_facet:
                     # Realloc if necessary
                     if fidx == csr_facets.shape[0]:
                         tmp = csr_facets
@@ -169,7 +175,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     return RaggedArray([csr_rows, csr_cells]), RaggedArray([csr_facet_rows, csr_facets])
 
 
-# @cython.boundscheck(False)
+@cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
@@ -323,3 +329,65 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
 
     return RaggedArray([patch_rows, patch_dofs]), RaggedArray([global_rows, global_dofs]), \
         RaggedArray([bc_rows, bc_dofs])
+
+
+def g2l_begin(PETSc.SF sf, PETSc.Vec gvec, PETSc.Vec lvec,
+              MPI.Datatype dtype):
+    cdef:
+        const PetscScalar *garray
+        PetscScalar *larray
+
+    VecGetArray(lvec.vec, &larray)
+    VecGetArrayRead(gvec.vec, &garray)
+
+    PetscSFBcastBegin(sf.sf, dtype.ob_mpi, garray, larray)
+
+    VecRestoreArray(lvec.vec, &larray)
+    VecRestoreArrayRead(gvec.vec, &garray)
+
+
+def g2l_end(PETSc.SF sf, PETSc.Vec gvec, PETSc.Vec lvec,
+            MPI.Datatype dtype):
+    cdef:
+        const PetscScalar *garray
+        PetscScalar *larray
+
+    VecGetArray(lvec.vec, &larray)
+    VecGetArrayRead(gvec.vec, &garray)
+
+    PetscSFBcastEnd(sf.sf, dtype.ob_mpi, garray, larray)
+
+    VecRestoreArray(lvec.vec, &larray)
+    VecRestoreArrayRead(gvec.vec, &garray)
+
+
+def l2g_begin(PETSc.SF sf, PETSc.Vec lvec, PETSc.Vec gvec,
+              MPI.Datatype dtype):
+    cdef:
+        MPI.Op op = MPI.SUM
+        const PetscScalar *larray
+        PetscScalar *garray
+
+    VecGetArrayRead(lvec.vec, &larray)
+    VecGetArray(gvec.vec, &garray)
+
+    PetscSFReduceBegin(sf.sf, dtype.ob_mpi, larray, garray, op.ob_mpi)
+
+    VecRestoreArrayRead(lvec.vec, &larray)
+    VecRestoreArray(gvec.vec, &garray)
+
+
+def l2g_end(PETSc.SF sf, PETSc.Vec lvec, PETSc.Vec gvec,
+            MPI.Datatype dtype):
+    cdef:
+        MPI.Op op = MPI.SUM
+        const PetscScalar *garray
+        PetscScalar *larray
+
+    VecGetArrayRead(lvec.vec, &larray)
+    VecGetArray(gvec.vec, &garray)
+
+    PetscSFReduceEnd(sf.sf, dtype.ob_mpi, larray, garray, op.ob_mpi)
+
+    VecRestoreArrayRead(lvec.vec, &larray)
+    VecRestoreArray(gvec.vec, &garray)
