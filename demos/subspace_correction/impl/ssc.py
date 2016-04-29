@@ -4,12 +4,15 @@ from firedrake import TestFunction, TrialFunction, DirichletBC, \
 from firedrake.utils import cached_property
 from firedrake.petsc import PETSc
 from pyop2 import op2
+from mpi4py import MPI
 from . import sscutils
 import numpy
 
 import ufl
 from ufl.algorithms import map_integrands, MultiFunction
-from .patches import get_cell_facet_patches, get_dof_patches
+from .patches import get_cell_facet_patches, get_dof_patches, \
+    g2l_begin, g2l_end, l2g_begin, l2g_end
+
 
 
 class ArgumentReplacer(MultiFunction):
@@ -65,7 +68,7 @@ class SubspaceCorrectionPrec(object):
         dm = mesh._plex
         cells, facets = get_cell_facet_patches(dm, mesh._cell_numbering)
         d, g, b = get_dof_patches(dm, dof_section,
-                                  V.cell_node_map().values,
+                                  V.cell_node_map().values_with_halo,
                                   bcs, cells, facets)
         self.cells = cells
         self.facets = facets
@@ -241,18 +244,66 @@ class SubspaceCorrectionPrec(object):
         return mat.handle
 
 
+def mpi_type(dtype, dim):
+    try:
+        tdict = MPI.__TypeDict__
+    except AttributeError:
+        tdict = MPI._typedict
+
+    btype = tdict[dtype.char]
+    if dim == 1:
+        return btype
+    typ = btype.Create_contiguous(dim)
+    typ.Commit()
+    return typ
+
+
 class PatchPC(object):
 
     def setUp(self, pc):
-        A, P = pc.getOperators()
-        ctx = P.getPythonContext()
-        ksp = PETSc.KSP().create()
-        pfx = pc.getOptionsPrefix()
-        ksp.setOptionsPrefix(pfx + "sub_")
-        ksp.setType(ksp.Type.PREONLY)
-        ksp.setFromOptions()
-        self.ksp = ksp
-        self.ctx = ctx
+        with PETSc.Log.Stage("PatchPC setup"):
+            A, P = pc.getOperators()
+            ctx = P.getPythonContext()
+            self.ksps = []
+            self.ctx = ctx
+            V = ctx.V
+            self._mpi_type = mpi_type(numpy.dtype(PETSc.ScalarType), V.dim)
+            dm = V._dm
+            self._sf = dm.getDefaultSF()
+
+            local = PETSc.Vec().create(comm=PETSc.COMM_SELF)
+            size = V.dof_dset.total_size * V.dim
+            local.setSizes((size, size), bsize=V.dim)
+            local.setUp()
+            self._local = local
+
+            # Now the patch vectors:
+            self._bs = []
+            self._ys = []
+            self._bcs = []
+            self._vscats = []
+            for i, m in enumerate(ctx.matrices):
+                ksp = PETSc.KSP().create(comm=PETSc.COMM_SELF)
+                pfx = pc.getOptionsPrefix()
+                ksp.setOptionsPrefix(pfx + "sub_")
+                ksp.setType(ksp.Type.PREONLY)
+                ksp.setOperators(m, m)
+                ksp.setFromOptions()
+                self.ksps.append(ksp)
+                size = (ctx.glob_patches[i].shape[0])*V.dim
+                b = PETSc.Vec().create(comm=PETSc.COMM_SELF)
+                b.setSizes((size, size), bsize=V.dim)
+                b.setUp()
+                indices = ctx.glob_patches[i]
+                vscat = PETSc.Scatter().create(self._local,
+                                               PETSc.IS().createBlock(V.dim,
+                                                                      indices,
+                                                                      comm=PETSc.COMM_SELF),
+                                               b, None)
+                self._vscats.append(vscat)
+                self._bs.append(b)
+                self._ys.append(b.duplicate())
+                self._bcs.append(numpy.zeros((len(ctx.bc_patches[i]), V.dim), dtype=PETSc.ScalarType))
 
     def view(self, pc, viewer=None):
         if viewer is not None:
@@ -264,60 +315,58 @@ class PatchPC(object):
         self.ksp.view(viewer)
 
     def apply(self, pc, x, y):
-        y.set(0)
-        # Apply y <- PC(x)
-        tmp_ys = []
-        ctx = self.ctx
-        V = ctx.V
-        bsize = ctx.V.dim
-        lsize = V.dof_dset.total_size*bsize
-        local = PETSc.Vec().create(comm=PETSc.COMM_SELF)
-        local.setSizes((lsize, lsize), bsize=bsize)
-        local.setUp()
-        local.set(0)
-        dm = V._dm
+        with PETSc.Log.Stage("PatchPC apply"):
+            y.set(0)
+            # Apply y <- PC(x)
+            ctx = self.ctx
+            local = self._local
+            local.set(0)
 
-        # x.view()
-        dm.globalToLocal(x, local, addv=PETSc.InsertMode.INSERT_VALUES)
-        # x.view()
-        # if PETSc.COMM_WORLD.rank == PETSc.COMM_WORLD.size - 1:
-        #     local.view()
-        for i, m in enumerate(ctx.matrices):
-            self.ksp.reset()
-            self.ksp.setOperators(m, m)
-            ly, b = m.createVecs()
-            ly.set(0)
-            b.set(0)
-            patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
-            bc_dofs = ctx.bc_patches.value[ctx.bc_patches.offset[i]:ctx.bc_patches.offset[i+1]]
-            b.array.reshape(-1, bsize)[:] = local.array_r.reshape(-1, bsize)[patch_dofs]
-            b.array.reshape(-1, bsize)[bc_dofs] = 0
-            self.ksp.solve(b, ly)
-            tmp_ys.append(ly)
+            sf = self._sf
+            mtype = self._mpi_type
+            # Can't use DMGlobalToLocal because we need to pass non-scalar MPI_Type.
+            g2l_begin(sf, x, local, mtype)
+            g2l_end(sf, x, local, mtype)
+            for i, m in enumerate(ctx.matrices):
+                ly = self._ys[i]
+                b = self._bs[i]
+                vscat = self._vscats[i]
+                vscat.begin(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
+                            mode=PETSc.ScatterMode.FORWARD)
+                vscat.end(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
+                          mode=PETSc.ScatterMode.FORWARD)
+                bcdofs = ctx.bc_patches[i]
+                # Zero boundary values
+                # TODO: Condense them out!
+                b.setValuesBlocked(bcdofs, self._bcs[i],
+                                   addv=PETSc.InsertMode.INSERT_VALUES)
+                self.ksps[i].solve(b, ly)
 
-        local.set(0)
-        for i, ly in enumerate(tmp_ys):
-            patch_dofs = ctx.glob_patches.value[ctx.glob_patches.offset[i]:ctx.glob_patches.offset[i+1]]
-            local.array.reshape(-1, bsize)[patch_dofs] += ly.array_r.reshape(-1, bsize)[:]
-
-        dm.localToGlobal(local, y, addv=PETSc.InsertMode.ADD_VALUES)
-        # y.view()
+            local.set(0)
+            for i, ly in enumerate(self._ys):
+                vscat = self._vscats[i]
+                vscat.begin(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+                vscat.end(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
+                          mode=PETSc.ScatterMode.REVERSE)
+            l2g_begin(sf, local, y, mtype)
+            l2g_end(sf, local, y, mtype)
 
 class P1PC(object):
 
     def setUp(self, pc):
-        self.pc = PETSc.PC().create()
-        self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
-        A, P = pc.getOperators()
-        ctx = P.getPythonContext()
-        op = ctx.P1_op
-        self.pc.setOperators(op, op)
-        self.pc.setOperators(A, A)
-        self.pc.setUp()
-        self.pc.setFromOptions()
-        self.transfer = ctx.transfer_op
-        self.work1 = self.transfer.createVecLeft()
-        self.work2 = self.transfer.createVecLeft()
+        with PETSc.Log.Stage("P1PC setup"):
+            self.pc = PETSc.PC().create()
+            self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
+            A, P = pc.getOperators()
+            ctx = P.getPythonContext()
+            op = ctx.P1_op
+            self.pc.setOperators(op, op)
+            self.pc.setUp()
+            self.pc.setFromOptions()
+            self.transfer = ctx.transfer_op
+            self.work1 = self.transfer.createVecLeft()
+            self.work2 = self.transfer.createVecLeft()
 
     def view(self, pc, viewer=None):
         if viewer is not None:
@@ -329,11 +378,10 @@ class P1PC(object):
         self.pc.view(viewer)
 
     def apply(self, pc, x, y):
-        self.pc.apply(x, y)
-        # y.set(0)
-        # self.work1.set(0)
-        # self.work2.set(0)
-        # self.transfer.mult(x, self.work1)
-        # self.pc.apply(self.work1, self.work2)
-        # self.transfer.multTranspose(self.work2, y)
-
+        with PETSc.Log.Stage("P1PC apply"):
+            y.set(0)
+            self.work1.set(0)
+            self.work2.set(0)
+            self.transfer.mult(x, self.work1)
+            self.pc.apply(self.work1, self.work2)
+            self.transfer.multTranspose(self.work2, y)

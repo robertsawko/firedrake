@@ -1,12 +1,20 @@
 cimport petsc4py.PETSc as PETSc
+cimport mpi4py.MPI as MPI
+
 
 cdef extern from "petsc.h":
     ctypedef long PetscInt
+    ctypedef double PetscScalar
     ctypedef enum PetscBool:
         PETSC_TRUE, PETSC_FALSE
     int PetscMalloc1(PetscInt,void*)
     int PetscFree(void*)
     int PetscSortInt(PetscInt,PetscInt[])
+
+    int VecGetArray(PETSc.PetscVec, PetscScalar**)
+    int VecGetArrayRead(PETSc.PetscVec, const PetscScalar**)
+    int VecRestoreArray(PETSc.PetscVec, PetscScalar**)
+    int VecRestoreArrayRead(PETSc.PetscVec, const PetscScalar**)
 
 cdef extern from "hash.h":
     ctypedef long khiter_t
@@ -52,3 +60,9 @@ cdef extern from "petscdm.h":
 cdef extern from "petscis.h":
     int PetscSectionGetOffset(PETSc.PetscSection,PetscInt,PetscInt*)
     int PetscSectionGetDof(PETSc.PetscSection,PetscInt,PetscInt*)
+
+cdef extern from "petscsf.h":
+    int PetscSFBcastBegin(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,)
+    int PetscSFBcastEnd(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*)
+    int PetscSFReduceBegin(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,MPI.MPI_Op)
+    int PetscSFReduceEnd(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,MPI.MPI_Op)
