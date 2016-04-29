@@ -37,8 +37,7 @@ A = assemble(a, bcs=bcs)
 Ap = assemble(aP, bcs=bcs)
 b = assemble(ell)
 
-
-solver = LinearSolver(A, P=None, options_prefix="")
+solver = LinearSolver(A, P=Ap, options_prefix="")
 
 A, P = solver.ksp.getOperators()
 
