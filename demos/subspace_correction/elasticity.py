@@ -94,7 +94,7 @@ A, P = solver.ksp.getOperators()
 
 # Need to remove this bit if don't use python pcs
 P = PETSc.Mat().create()
-P.setSizes(*A.getSizes())
+P.setSizes(A.getSizes(), bsize=A.getBlockSizes())
 P.setType(P.Type.PYTHON)
 P.setPythonContext(SCP)
 P.setUp()
