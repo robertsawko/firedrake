@@ -19,9 +19,8 @@ V = VectorFunctionSpace(M, "CG", k+1)
 W = FunctionSpace(M, "CG", k)
 VW = V * W
 
-bcval = (1, 0)
-bcs = [DirichletBC(VW.sub(0), (1,0), (1,)),
-       DirichletBC(VW.sub(0), (0,0), (2,3,4))]
+bcs = [DirichletBC(VW.sub(0), Constant((1, 0)), (4, )),  # Top
+       DirichletBC(VW.sub(0), Constant((0, 0)), (1, 2, 3))]  # Other sides
 
 u, p = TrialFunctions(VW)
 v, q = TestFunctions(VW)
@@ -34,25 +33,39 @@ f2 = project(Expression("0"), W)
 
 ell = inner(f1, v)*dx + f2*q*dx
 
-up = Function(VW)
-
-solve(a==ell, up)
-
 A = assemble(a, bcs=bcs)
 Ap = assemble(aP, bcs=bcs)
 b = assemble(ell)
 
 
-solver = LinearSolver(A, P=Ap, options_prefix="")
+solver = LinearSolver(A, P=None, options_prefix="")
 
 A, P = solver.ksp.getOperators()
 
-# Now: I think we need to:
-# extract the (0,0) block from the matnest of P
-# Set its Python context to SCP (which we need to create)
-# set everything else from options?
+P00 = PETSc.Mat().create()
+P00.setSizes(((V.dof_dset.size * V.dim, None),
+              (V.dof_dset.size * V.dim, None)),
+             bsize=(V.dim, V.dim))
+P00.setType(P00.Type.PYTHON)
 
+u = TrialFunction(V)
+v = TestFunction(V)
+p00 = inner(grad(u), grad(v))*dx
 
+pbcs = [DirichletBC(V, bc.function_arg, bc.sub_domain) for bc in bcs]
+SCP = SubspaceCorrectionPrec(p00, bcs=pbcs)
+P00.setPythonContext(SCP)
 
-             
+P = PETSc.Mat().createNest([[P00, None],
+                            [None, Ap.M[1, 1].handle]],
+                           isrows=VW.dof_dset.field_ises,
+                           iscols=VW.dof_dset.field_ises)
 
+P.setUp()
+P.setFromOptions()
+
+solver.ksp.setOperators(A, P)
+
+u = Function(VW, name="solution")
+
+solver.solve(u, b)
