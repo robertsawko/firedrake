@@ -28,7 +28,7 @@ v, q = TestFunctions(VW)
 a = inner(grad(u), grad(v))*dx - p*div(v)*dx + div(u)*q*dx
 aP = inner(grad(u), grad(v))*dx + p*q*dx
 
-f1 = project(Expression(("0","0")), V)
+f1 = project(Expression(("0", "0")), V)
 f2 = project(Expression("0"), W)
 
 ell = inner(f1, v)*dx + f2*q*dx

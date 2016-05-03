@@ -1,23 +1,25 @@
--ksp_type fgmres
+-ksp_type gmres
 -pc_type fieldsplit
--pc_fieldsplit_type schur
--pc_fieldsplit_schur_fact_type diag
+-pc_fieldsplit_type additive
 # Need this so that PMat is not used to build S, only Sp
 -pc_use_amat
+# -fieldsplit_0_ksp_type preonly
+# -fieldsplit_0_pc_type lu
+# -fieldsplit_0_ksp_max_it 4
 -fieldsplit_0_ksp_type preonly
 -fieldsplit_0_pc_type composite
 -fieldsplit_0_pc_composite_type additive
-# Until PETSc bug is fixed, use
--fieldsplit_0_pc_composite_pcs python
-# The correct one is the following, but a bug means the pc is applied
-# twice when using a schur complement pc.
-# -fieldsplit_0_pc_composite_pcs python,python
+# # Until PETSc bug is fixed, use
+-fieldsplit_0_pc_composite_pcs python,python
+# # The correct one is the following, but a bug means the pc is applied
+# # twice when using a schur complement pc.
+# # -fieldsplit_0_pc_composite_pcs python,python
 -fieldsplit_0_sub_0_pc_python_type impl.PatchPC
 -fieldsplit_0_sub_0_sub_ksp_type preonly
 -fieldsplit_0_sub_0_sub_pc_type lu
 -fieldsplit_0_sub_1_pc_python_type impl.P1PC
--fieldsplit_0_sub_1_lo_pc_type lu
--fieldsplit_1_ksp_type gmres
--fieldsplit_1_ksp_max_it 10
+-fieldsplit_0_sub_1_lo_pc_type hypre
+-fieldsplit_1_ksp_type preonly
+# -fieldsplit_1_ksp_max_it 10
 -fieldsplit_1_pc_type lu
 -ksp_monitor_true_residual
