@@ -70,6 +70,7 @@ class SubspaceCorrectionPrec(object):
         d, g, b = get_dof_patches(dm, dof_section,
                                   V.cell_node_map().values_with_halo,
                                   bcs, cells, facets)
+        self.bc_nodes = bcs
         self.cells = cells
         self.facets = facets
         self.dof_patches = d
@@ -312,11 +313,12 @@ class PatchPC(object):
             comm = pc.comm
 
         PETSc.Sys.Print("Vertex-patch preconditioner, all subsolves identical", comm=comm)
-        self.ksp.view(viewer)
+        self.ksps[0].view(viewer)
 
     def apply(self, pc, x, y):
+        # x.copy(y)
+        y.set(0)
         with PETSc.Log.Stage("PatchPC apply"):
-            y.set(0)
             # Apply y <- PC(x)
             ctx = self.ctx
             local = self._local
@@ -351,6 +353,8 @@ class PatchPC(object):
                           mode=PETSc.ScatterMode.REVERSE)
             l2g_begin(sf, local, y, mtype)
             l2g_end(sf, local, y, mtype)
+            y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]
+
 
 class P1PC(object):
 
@@ -360,6 +364,7 @@ class P1PC(object):
             self.pc.setOptionsPrefix(pc.getOptionsPrefix() + "lo_")
             A, P = pc.getOperators()
             ctx = P.getPythonContext()
+            self.ctx = ctx
             op = ctx.P1_op
             self.pc.setOperators(op, op)
             self.pc.setUp()
@@ -385,3 +390,4 @@ class P1PC(object):
             self.transfer.mult(x, self.work1)
             self.pc.apply(self.work1, self.work2)
             self.transfer.multTranspose(self.work2, y)
+            y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]

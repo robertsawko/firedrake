@@ -4,6 +4,9 @@ from collections import namedtuple
 cimport numpy
 cimport petsc4py.PETSc as PETSc
 
+from mpi4py import MPI
+cimport mpi4py.MPI as MPI
+
 from patches cimport *
 
 numpy.import_array()

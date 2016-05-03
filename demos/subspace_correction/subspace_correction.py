@@ -17,12 +17,12 @@ M.coordinates.dat.data[:] -= 1
 scalar = True
 if scalar:
     V = FunctionSpace(M, "CG", k)
-    bcval = 0
+    bcval = 1
 else:
     V = VectorFunctionSpace(M, "CG", k)
     bcval = (0, 0)
 
-bcs = DirichletBC(V, bcval, (1, 2, 3, 4)) # , 5, 6))
+bcs = [DirichletBC(V, bcval, (1, 2, 3, 4))]
 u = TrialFunction(V)
 v = TestFunction(V)
 eps = 1
@@ -40,11 +40,11 @@ xx = x*x
 yy = y*y
 
 if scalar:
-    exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy))
+    exact_expr = sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy)) + bcval
 else:
     exact_expr = as_vector([sin(pi*x)*sin(pi*y)*exp(-10*(xx + yy)), 0])
 
-forcing = Constant(1) # -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
+forcing = -(diff(diff(exact_expr, x), x) + diff(diff(exact_expr, y), y))
 
 L = inner(forcing, v)*dx
 u = Function(V, name="solution")
@@ -92,8 +92,8 @@ solver = LinearSolver(A, options_prefix="")
 
 A, P = solver.ksp.getOperators()
 
-if PETSc.COMM_WORLD.rank == 0:
-    print repr(SCP.facets)
+# if PETSc.COMM_WORLD.rank == 0:
+#     print repr(SCP.facets)
 # Need to remove this bit if don't use python pcs
 P = PETSc.Mat().create()
 P.setSizes(A.getSizes(), bsize=A.getBlockSizes())
@@ -107,6 +107,6 @@ u = Function(V, name="solution")
 
 solver.solve(u, b)
 
-# exact = Function(V).interpolate(exact_expr)
-# diff = assemble(exact - u)
-# print norm(diff)
+exact = Function(V).interpolate(exact_expr)
+diff = assemble(exact - u)
+print norm(diff)
