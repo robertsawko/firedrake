@@ -11,7 +11,7 @@ import numpy
 import ufl
 from ufl.algorithms import map_integrands, MultiFunction
 from .patches import get_cell_facet_patches, get_dof_patches, \
-    g2l_begin, g2l_end, l2g_begin, l2g_end
+    g2l_begin, g2l_end, l2g_begin, l2g_end, apply_patch
 
 
 
@@ -70,12 +70,25 @@ class SubspaceCorrectionPrec(object):
         d, g, b = get_dof_patches(dm, dof_section,
                                   V.cell_node_map().values_with_halo,
                                   bcs, cells, facets)
-        self.bc_nodes = bcs
-        self.cells = cells
+        self.bc_nodes = PETSc.IS().createBlock(V.dim, bcs, comm=PETSc.COMM_WORLD)
+        self.cells = []
+        for i in range(len(cells)):
+            self.cells.append(PETSc.IS().createGeneral(cells[i], comm=PETSc.COMM_SELF))
         self.facets = facets
-        self.dof_patches = d
-        self.glob_patches = g
-        self.bc_patches = b
+        tmp = []
+        for i in range(len(d)):
+            tmp.append(PETSc.IS().createBlock(V.dim, d[i], comm=PETSc.COMM_SELF))
+        self.dof_patches = tmp
+
+        tmp = []
+        for i in range(len(g)):
+            tmp.append(PETSc.IS().createBlock(V.dim, g[i], comm=PETSc.COMM_SELF))
+        self.glob_patches = tmp
+
+        tmp = []
+        for i in range(len(b)):
+            tmp.append(PETSc.IS().createBlock(V.dim, b[i], comm=PETSc.COMM_SELF))
+        self.bc_patches = tmp
 
     @cached_property
     def P1_form(self):
@@ -119,7 +132,6 @@ class SubspaceCorrectionPrec(object):
     @cached_property
     def matrices(self):
         mats = []
-        dim = self.V.dof_dset.cdim
         coords = self.mesh.coordinates
         carg = coords.dat._data.ctypes.data
         cmap = coords.cell_node_map()._values.ctypes.data
@@ -129,25 +141,24 @@ class SubspaceCorrectionPrec(object):
             c = coeffs[n]
             args.append(c.dat._data.ctypes.data)
             args.append(c.cell_node_map()._values.ctypes.data)
-        for i in range(len(self.dof_patches.offset) - 1):
+        for i in range(len(self.dof_patches)):
             mat = PETSc.Mat().create(comm=PETSc.COMM_SELF)
-            size = (self.glob_patches.offset[i+1] - self.glob_patches.offset[i])*dim
+            size = self.glob_patches[i].getSize()
+            bs = self.glob_patches[i].getBlockSize()
             mat.setSizes(((size, size), (size, size)),
-                         bsize=dim)
+                         bsize=bs)
             mat.setType(mat.Type.DENSE)
             mat.setOptionsPrefix("scp_")
             mat.setFromOptions()
             mat.setUp()
             marg = mat.handle
-            mmap = self.dof_patches.value[self.dof_patches.offset[i]:].ctypes.data
-            cells = self.cells.value[self.cells.offset[i]:].ctypes.data
-            end = self.cells.offset[i+1] - self.cells.offset[i]
+            mmap = self.dof_patches[i].getBlockIndices().ctypes.data
+            cells = self.cells[i].getIndices().ctypes.data
+            end = self.cells[i].getSize()
             with PETSc.Log.Event("Fill mat"):
                 self.matrix_callable(0, end, cells, marg, mmap, mmap, carg, cmap, *args)
                 mat.assemble()
-                rows = self.bc_patches.value[self.bc_patches.offset[i]:self.bc_patches.offset[i+1]]
-                rows = numpy.dstack([dim*rows + i for i in range(dim)]).flatten()
-                mat.zeroRowsColumns(rows)
+                mat.zeroRowsColumns(self.bc_patches[i])
             mats.append(mat)
         return tuple(mats)
 
@@ -281,8 +292,6 @@ class PatchPC(object):
         # Now the patch vectors:
         self._bs = []
         self._ys = []
-        self._bcs = []
-        self._vscats = []
         for i, m in enumerate(ctx.matrices):
             ksp = PETSc.KSP().create(comm=PETSc.COMM_SELF)
             pfx = pc.getOptionsPrefix()
@@ -291,20 +300,13 @@ class PatchPC(object):
             ksp.setOperators(m, m)
             ksp.setFromOptions()
             self.ksps.append(ksp)
-            size = (ctx.glob_patches[i].shape[0])*V.dim
+            size = ctx.glob_patches[i].getSize()
+            bs = ctx.glob_patches[i].getBlockSize()
             b = PETSc.Vec().create(comm=PETSc.COMM_SELF)
-            b.setSizes((size, size), bsize=V.dim)
+            b.setSizes((size, size), bsize=bs)
             b.setUp()
-            indices = ctx.glob_patches[i]
-            vscat = PETSc.Scatter().create(self._local,
-                                           PETSc.IS().createBlock(V.dim,
-                                                                  indices,
-                                                                  comm=PETSc.COMM_SELF),
-                                           b, None)
-            self._vscats.append(vscat)
             self._bs.append(b)
             self._ys.append(b.duplicate())
-            self._bcs.append(numpy.zeros((len(ctx.bc_patches[i]), V.dim), dtype=PETSc.ScalarType))
 
     def view(self, pc, viewer=None):
         if viewer is not None:
@@ -316,45 +318,7 @@ class PatchPC(object):
         self.ksps[0].view(viewer)
 
     def apply(self, pc, x, y):
-        # x.copy(y)
-        y.set(0)
-
-        with PETSc.Log.Stage("PatchPC apply"):
-            # Apply y <- PC(x)
-            ctx = self.ctx
-            local = self._local
-            local.set(0)
-
-            sf = self._sf
-            mtype = self._mpi_type
-            # Can't use DMGlobalToLocal because we need to pass non-scalar MPI_Type.
-            g2l_begin(sf, x, local, mtype)
-            g2l_end(sf, x, local, mtype)
-            for i, m in enumerate(ctx.matrices):
-                ly = self._ys[i]
-                b = self._bs[i]
-                vscat = self._vscats[i]
-                vscat.begin(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
-                            mode=PETSc.ScatterMode.FORWARD)
-                vscat.end(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
-                          mode=PETSc.ScatterMode.FORWARD)
-                bcdofs = ctx.bc_patches[i]
-                # Zero boundary values
-                # TODO: Condense them out!
-                b.setValuesBlocked(bcdofs, self._bcs[i],
-                                   addv=PETSc.InsertMode.INSERT_VALUES)
-                self.ksps[i].solve(b, ly)
-
-            local.set(0)
-            for i, ly in enumerate(self._ys):
-                vscat = self._vscats[i]
-                vscat.begin(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
-                            mode=PETSc.ScatterMode.REVERSE)
-                vscat.end(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
-                          mode=PETSc.ScatterMode.REVERSE)
-            l2g_begin(sf, local, y, mtype)
-            l2g_end(sf, local, y, mtype)
-            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
+        apply_patch(self, x, y)
 
 
 class P1PC(object):
@@ -390,5 +354,5 @@ class P1PC(object):
             self.transfer.mult(x, self.work1)
             self.pc.apply(self.work1, self.work2)
             self.transfer.multTranspose(self.work2, y)
-            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
-
+            indices = self.ctx.bc_nodes.getIndices()
+            y.array[indices] = x.array_r[indices]

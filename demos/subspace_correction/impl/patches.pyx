@@ -67,7 +67,7 @@ def get_cell_facet_patches(PETSc.DM dm, PETSc.Section cell_numbering):
     fStart, fEnd = dm.getHeightStratum(1)
     cStart, cEnd = dm.getHeightStratum(0)
 
-    
+
     DMGetLabel(dm.dm, <char *>"exterior_facets", &facet_label)
     DMLabelCreateIndex(facet_label, fStart, fEnd)
     DMGetLabel(dm.dm, <char *>"op2_core", &core)
@@ -334,6 +334,118 @@ def get_dof_patches(PETSc.DM dm, PETSc.Section dof_section,
         RaggedArray([bc_rows, bc_dofs])
 
 
+cdef inline void insert_forward(PETSc.Vec g, PETSc.Vec l, PETSc.IS iset) nogil:
+    cdef:
+        const PetscScalar *garr
+        PetscScalar *arr
+        const PetscInt *indices
+        PetscInt bs
+        PetscInt nind
+        PetscInt i, j, idx
+
+    ISGetBlockSize(iset.iset, &bs)
+    ISBlockGetSize(iset.iset, &nind)
+    ISBlockGetIndices(iset.iset, &indices)
+    VecGetArrayRead(g.vec, &garr)
+    VecGetArray(l.vec, &arr)
+    for i in range(nind):
+        for j in range(bs):
+            arr[bs*i + j] = garr[bs*indices[i] + j]
+    ISBlockRestoreIndices(iset.iset, &indices)
+    VecRestoreArrayRead(g.vec, &garr)
+    VecRestoreArray(l.vec, &arr)
+
+
+cdef inline void add_reverse(PETSc.Vec l, PETSc.Vec g, PETSc.IS iset) nogil:
+    cdef:
+        const PetscScalar *arr
+        PetscScalar *garr
+        const PetscInt *indices
+        PetscInt bs
+        PetscInt nind
+        PetscInt i, j
+
+    ISGetBlockSize(iset.iset, &bs)
+    ISBlockGetSize(iset.iset, &nind)
+    ISBlockGetIndices(iset.iset, &indices)
+    VecGetArrayRead(l.vec, &arr)
+    VecGetArray(g.vec, &garr)
+    for i in range(nind):
+        for j in range(bs):
+            garr[bs*indices[i] + j] += arr[bs*i + j]
+    ISBlockRestoreIndices(iset.iset, &indices)
+    VecRestoreArrayRead(l.vec, &arr)
+    VecRestoreArray(g.vec, &garr)
+
+
+def apply_patch(self, PETSc.Vec x, PETSc.Vec y):
+    cdef:
+        PETSc.SF sf = self._sf
+        MPI.Datatype dtype = self._mpi_type
+        PetscInt i, j, k, num_patches
+        PETSc.Vec ly, b, local
+        PETSc.KSP ksp
+        PETSc.Mat Ai
+        PETSc.IS bcind
+        PETSc.IS gind
+        const PetscInt *bcindices
+        PetscInt nind
+        PetscInt bs
+        PetscScalar *arr
+        const PetscScalar *xarr
+    ctx = self.ctx
+    local = self._local
+    y.set(0)
+    local.set(0)
+
+    g2l_begin(sf, x, local, dtype)
+    g2l_end(sf, x, local, dtype)
+
+    num_patches = len(ctx.matrices)
+    for i in range(num_patches):
+        ly = self._ys[i]
+        b = self._bs[i]
+        bcind = ctx.bc_patches[i]
+        gind = ctx.glob_patches[i]
+        ksp = self.ksps[i]
+
+        insert_forward(local, b, gind)
+
+        ISBlockGetIndices(bcind.iset, &bcindices)
+        ISGetBlockSize(bcind.iset, &bs)
+        ISBlockGetSize(bcind.iset, &nind)
+        VecGetArray(b.vec, &arr)
+        for j in range(nind):
+            for k in range(bs):
+                arr[bs*bcindices[j] + k] = 0
+        ISBlockRestoreIndices(bcind.iset, &bcindices)
+        VecRestoreArray(b.vec, &arr)
+
+        KSPSolve(ksp.ksp, b.vec, ly.vec)
+
+    local.set(0)
+    for i in range(num_patches):
+        ly = self._ys[i]
+        gind = ctx.glob_patches[i]
+        add_reverse(ly, local, gind)
+
+    l2g_begin(sf, local, y, dtype)
+    l2g_end(sf, local, y, dtype)
+    VecGetArrayRead(x.vec, &xarr)
+    VecGetArray(y.vec, &arr)
+    bcind = ctx.bc_nodes
+    ISBlockGetIndices(bcind.iset, &bcindices)
+    ISGetBlockSize(bcind.iset, &bs)
+    ISBlockGetSize(bcind.iset, &nind)
+    for i in range(nind):
+        for j in range(bs):
+            idx = bs*bcindices[i] + j
+            arr[idx] = xarr[idx]
+    ISBlockRestoreIndices(bcind.iset, &bcindices)
+    VecRestoreArrayRead(x.vec, &xarr)
+    VecRestoreArray(y.vec, &arr)
+
+
 def g2l_begin(PETSc.SF sf, PETSc.Vec gvec, PETSc.Vec lvec,
               MPI.Datatype dtype):
     cdef:
@@ -384,8 +496,8 @@ def l2g_end(PETSc.SF sf, PETSc.Vec lvec, PETSc.Vec gvec,
             MPI.Datatype dtype):
     cdef:
         MPI.Op op = MPI.SUM
-        const PetscScalar *garray
-        PetscScalar *larray
+        const PetscScalar *larray
+        PetscScalar *garray
 
     VecGetArrayRead(lvec.vec, &larray)
     VecGetArray(gvec.vec, &garray)
