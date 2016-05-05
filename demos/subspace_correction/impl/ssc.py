@@ -318,41 +318,43 @@ class PatchPC(object):
     def apply(self, pc, x, y):
         # x.copy(y)
         y.set(0)
-        # Apply y <- PC(x)
-        ctx = self.ctx
-        local = self._local
-        local.set(0)
 
-        sf = self._sf
-        mtype = self._mpi_type
-        # Can't use DMGlobalToLocal because we need to pass non-scalar MPI_Type.
-        g2l_begin(sf, x, local, mtype)
-        g2l_end(sf, x, local, mtype)
-        for i, m in enumerate(ctx.matrices):
-            ly = self._ys[i]
-            b = self._bs[i]
-            vscat = self._vscats[i]
-            vscat.begin(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
-                        mode=PETSc.ScatterMode.FORWARD)
-            vscat.end(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
-                      mode=PETSc.ScatterMode.FORWARD)
-            bcdofs = ctx.bc_patches[i]
-            # Zero boundary values
-            # TODO: Condense them out!
-            b.setValuesBlocked(bcdofs, self._bcs[i],
-                               addv=PETSc.InsertMode.INSERT_VALUES)
-            self.ksps[i].solve(b, ly)
+        with PETSc.Log.Stage("PatchPC apply"):
+            # Apply y <- PC(x)
+            ctx = self.ctx
+            local = self._local
+            local.set(0)
 
-        local.set(0)
-        for i, ly in enumerate(self._ys):
-            vscat = self._vscats[i]
-            vscat.begin(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
-                        mode=PETSc.ScatterMode.REVERSE)
-            vscat.end(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
-                      mode=PETSc.ScatterMode.REVERSE)
-        l2g_begin(sf, local, y, mtype)
-        l2g_end(sf, local, y, mtype)
-        y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]
+            sf = self._sf
+            mtype = self._mpi_type
+            # Can't use DMGlobalToLocal because we need to pass non-scalar MPI_Type.
+            g2l_begin(sf, x, local, mtype)
+            g2l_end(sf, x, local, mtype)
+            for i, m in enumerate(ctx.matrices):
+                ly = self._ys[i]
+                b = self._bs[i]
+                vscat = self._vscats[i]
+                vscat.begin(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
+                            mode=PETSc.ScatterMode.FORWARD)
+                vscat.end(local, b, addv=PETSc.InsertMode.INSERT_VALUES,
+                          mode=PETSc.ScatterMode.FORWARD)
+                bcdofs = ctx.bc_patches[i]
+                # Zero boundary values
+                # TODO: Condense them out!
+                b.setValuesBlocked(bcdofs, self._bcs[i],
+                                   addv=PETSc.InsertMode.INSERT_VALUES)
+                self.ksps[i].solve(b, ly)
+
+            local.set(0)
+            for i, ly in enumerate(self._ys):
+                vscat = self._vscats[i]
+                vscat.begin(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
+                            mode=PETSc.ScatterMode.REVERSE)
+                vscat.end(ly, local, addv=PETSc.InsertMode.ADD_VALUES,
+                          mode=PETSc.ScatterMode.REVERSE)
+            l2g_begin(sf, local, y, mtype)
+            l2g_end(sf, local, y, mtype)
+            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
 
 
 class P1PC(object):
@@ -381,10 +383,12 @@ class P1PC(object):
         self.pc.view(viewer)
 
     def apply(self, pc, x, y):
-        y.set(0)
-        self.work1.set(0)
-        self.work2.set(0)
-        self.transfer.mult(x, self.work1)
-        self.pc.apply(self.work1, self.work2)
-        self.transfer.multTranspose(self.work2, y)
-        y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]
+        with PETSc.Log.Stage("P1PC apply"):
+            y.set(0)
+            self.work1.set(0)
+            self.work2.set(0)
+            self.transfer.mult(x, self.work1)
+            self.pc.apply(self.work1, self.work2)
+            self.transfer.multTranspose(self.work2, y)
+            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
+
