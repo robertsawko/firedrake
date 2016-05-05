@@ -353,7 +353,7 @@ class PatchPC(object):
                           mode=PETSc.ScatterMode.REVERSE)
             l2g_begin(sf, local, y, mtype)
             l2g_end(sf, local, y, mtype)
-            y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]
+            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
 
 
 class P1PC(object):
@@ -390,4 +390,4 @@ class P1PC(object):
             self.transfer.mult(x, self.work1)
             self.pc.apply(self.work1, self.work2)
             self.transfer.multTranspose(self.work2, y)
-            y.array.reshape(-1, 2)[self.ctx.bc_nodes] = x.array_r.reshape(-1, 2)[self.ctx.bc_nodes]
+            y.array.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes] = x.array_r.reshape(-1, self.ctx.V.dim)[self.ctx.bc_nodes]
