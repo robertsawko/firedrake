@@ -103,7 +103,12 @@ solver.ksp.setOperators(A, P)
 
 u = Function(V, name="solution")
 
-solver.solve(u, b)
+with PETSc.Log.Stage("Make patch problems"):
+    with PETSc.Log.Event("Total time"):
+        SCP.matrices
+
+with PETSc.Log.Stage("SCP Solve"):
+    solver.solve(u, b)
 
 #exact = Function(V).interpolate(exact_expr)
 #diff = assemble(exact - u)
