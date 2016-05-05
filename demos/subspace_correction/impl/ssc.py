@@ -62,6 +62,7 @@ class SubspaceCorrectionPrec(object):
                 bcs = (bcs, )
             self.bcs = bcs
             bcs = numpy.unique(numpy.concatenate([bc.nodes for bc in bcs]))
+            bcs = bcs[bcs < V.dof_dset.size]
 
         dof_section = V._dm.getDefaultSection()
         dm = mesh._plex
@@ -69,8 +70,10 @@ class SubspaceCorrectionPrec(object):
         d, g, b = get_dof_patches(dm, dof_section,
                                   V.cell_node_map().values_with_halo,
                                   bcs, cells, facets)
-        self.bc_nodes = bcs
-        self.cells = cells
+        self.bc_nodes = PETSc.IS().createBlock(V.dim, bcs, comm=PETSc.COMM_SELF)
+        self.cells = []
+        for i in range(len(cells)):
+            self.cells.append(PETSc.IS().createGeneral(cells[i], comm=PETSc.COMM_SELF))
         self.facets = facets
         self.dof_patches = d
         self.glob_patches = g
