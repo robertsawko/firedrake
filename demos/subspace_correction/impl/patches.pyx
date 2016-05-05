@@ -344,7 +344,7 @@ cdef inline void insert_forward(PETSc.Vec g, PETSc.Vec l, PETSc.IS iset) nogil:
         PetscInt i, j, idx
 
     ISGetBlockSize(iset.iset, &bs)
-    ISBlockGetSize(iset.iset, &nind)
+    ISBlockGetLocalSize(iset.iset, &nind)
     ISBlockGetIndices(iset.iset, &indices)
     VecGetArrayRead(g.vec, &garr)
     VecGetArray(l.vec, &arr)
@@ -366,7 +366,7 @@ cdef inline void add_reverse(PETSc.Vec l, PETSc.Vec g, PETSc.IS iset) nogil:
         PetscInt i, j
 
     ISGetBlockSize(iset.iset, &bs)
-    ISBlockGetSize(iset.iset, &nind)
+    ISBlockGetLocalSize(iset.iset, &nind)
     ISBlockGetIndices(iset.iset, &indices)
     VecGetArrayRead(l.vec, &arr)
     VecGetArray(g.vec, &garr)
@@ -413,7 +413,7 @@ def apply_patch(self, PETSc.Vec x, PETSc.Vec y):
 
         ISBlockGetIndices(bcind.iset, &bcindices)
         ISGetBlockSize(bcind.iset, &bs)
-        ISBlockGetSize(bcind.iset, &nind)
+        ISBlockGetLocalSize(bcind.iset, &nind)
         VecGetArray(b.vec, &arr)
         for j in range(nind):
             for k in range(bs):
@@ -436,7 +436,7 @@ def apply_patch(self, PETSc.Vec x, PETSc.Vec y):
     bcind = ctx.bc_nodes
     ISBlockGetIndices(bcind.iset, &bcindices)
     ISGetBlockSize(bcind.iset, &bs)
-    ISBlockGetSize(bcind.iset, &nind)
+    ISBlockGetLocalSize(bcind.iset, &nind)
     for i in range(nind):
         for j in range(bs):
             idx = bs*bcindices[i] + j

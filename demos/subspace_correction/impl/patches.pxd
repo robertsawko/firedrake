@@ -76,7 +76,7 @@ cdef extern from "petscis.h" nogil:
     int PetscSectionGetOffset(PETSc.PetscSection,PetscInt,PetscInt*)
     int PetscSectionGetDof(PETSc.PetscSection,PetscInt,PetscInt*)
     int ISGetBlockSize(PETSc.PetscIS, PetscInt*)
-    int ISBlockGetSize(PETSc.PetscIS, PetscInt*)
+    int ISBlockGetLocalSize(PETSc.PetscIS, PetscInt*)
     int ISBlockGetIndices(PETSc.PetscIS, PetscInt*[])
     int ISBlockRestoreIndices(PETSc.PetscIS, PetscInt*[])
 
