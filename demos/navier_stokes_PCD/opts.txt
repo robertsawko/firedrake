@@ -1,0 +1,27 @@
+-snes_monitor
+-snes_atol 1.e-6
+#-ksp_monitor_true_residual
+-ksp_converged_reason
+-ksp_type fgmres
+-ksp_atol 1.e-8
+-pc_matrix_type pcd.PCDMat
+-pc_type fieldsplit
+-pc_fieldsplit_type schur
+-pc_fieldsplit_schur_fact_type lower
+-pc_use_amat
+-pc_fieldsplit_0_fields 0
+-pc_fieldsplit_1_fields 1
+-fieldsplit_0_ksp_type gmres
+-fieldsplit_0_pc_type hypre
+-fieldsplit_0_pc_hypre_type boomeramg
+-fieldsplit_0_ksp_atol 1.e-8
+-fieldsplit_1_ksp_type preonly
+-fieldsplit_1_pc_type python
+-fieldsplit_1_pc_python_type pcd.PCDPrec
+-fieldsplit_1_Mp_ksp_type cg
+-fieldsplit_1_Mp_ksp_atol 1.e-8
+-fieldsplit_1_Mp_pc_type jacobi
+-fieldsplit_1_Kp_ksp_type cg
+-fieldsplit_1_Kp_ksp_atol 1.e-8
+-fieldsplit_1_Kp_pc_type hypre
+
