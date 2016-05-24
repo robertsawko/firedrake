@@ -139,7 +139,8 @@ class NonlinearVariationalSolver(object):
 
         # I think here we need to fish out the matrix type used
         # for the preconditioner?
-        Jp_matrix_type = opts.getString(self._opt_prefix+'pc_matrix_type')
+        Jp_matrix_type = opts.getString(self._opt_prefix+'pc_matrix_type',
+                                        'firedrake')
  
         ctx = SNESContext(problem, Jp_matrix_type, extra_args)
 
