@@ -76,7 +76,11 @@ class PCDMat(object):
         
         S_hat.setPythonContext(shat_ctx)
 
-        F = ctx._jac.M[0,0].handle
+        # Pull out a matrix that works in a MatVec
+        rset, cset = ctx._jac.M.sparsity.dsets
+        isrow = rset.field_ises[0]
+        iscol = cset.field_ises[0]
+        F = ctx._jac.M.handle.getSubMatrix(isrow, iscol=iscol)
         M = PETSc.Mat().createNest([[F, None], [None, S_hat]],
                                    isrows=VW.dof_dset.field_ises,
                                    iscols=VW.dof_dset.field_ises)
