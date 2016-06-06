@@ -13,6 +13,14 @@ from firedrake.petsc import PETSc
 import weakref
 
 class SNESContext(object):
+    """
+    Context holding information for SNES callbacks.
+
+    :arg problem: a :class:`NonlinearVariationalProblem`.
+
+    The idea here is that the SNES holds a shell DM which contains
+    the field split information as "user context".  
+    """
     def __init__(self, problem, Jp_matrix_type='firedrake', extra_args={}):
         from firedrake.assemble import assemble
         import ufl, ufl.classes
@@ -61,6 +69,12 @@ class SNESContext(object):
 
         
     def form_function(self, snes, X, F):
+        """Form the residual for this problem
+
+        :arg snes: a PETSc SNES object
+        :arg X: the current guess (a Vec)
+        :arg F: the residual at X (a Vec)
+        """
         from firedrake.assemble import assemble
         dm = snes.getDM()
         ctx = dm.getAppCtx()
@@ -82,6 +96,13 @@ class SNESContext(object):
         return
 
     def form_jacobian(self, snes, X, J, P):
+        """Form the Jacobian for this problem
+
+        :arg snes: a PETSc SNES object
+        :arg X: the current guess (a Vec)
+        :arg J: the Jacobian (a Mat)
+        :arg P: the preconditioner matrix (a Mat)
+        """
         from firedrake.assemble import assemble
         prob = self.problem
         with self._x.dat.vec as v:
@@ -96,14 +117,17 @@ class SNESContext(object):
         
 
     def set_function(self, snes):
+        """Set the residual evaluation callback function for PETSc"""
         with self._F.dat.vec as v:
             snes.setFunction(self.form_function, v)
         return
 
     def set_jacobian(self, snes):
+        """Set the residual evaluation callback function for PETSc"""        
         snes.setJacobian(self.form_jacobian, J=self._jac_petsc, P=self._pjac_petsc)
 
     def set_nullspace(self, nullspace, ises=None):
+        """Set the nullspace for PETSc"""
         if nullspace is None:
             return
         nullspace._apply(self._jacs[-1]._M)
@@ -114,8 +138,39 @@ class SNESContext(object):
 
         
 class NonlinearVariationalSolver(object):
+    """Solves a :class:`NonlinearVariationalProblem`."""
     _id = 0
     def __init__(self, problem, extra_args={}, **kwargs):
+        """
+        :arg problem: A :class:`NonlinearVariationalProblem` to solve.
+        :kwarg extra_args: an optional dict containing information to
+               be passed to any user-defined preconditioners.
+               For example, this could contain problem parameters
+               that cannot be collected directly from the ufl bilinear
+               form
+        :kwarg nullspace: an optional :class:`.VectorSpaceBasis` (or
+               :class:`.MixedVectorSpaceBasis`) spanning the null
+               space of the operator.
+        :kwarg solver_parameters: Solver parameters to pass to PETSc.
+            This should be a dict mapping PETSc options to values.  For
+            example, to set the nonlinear solver type to just use a linear
+            solver:
+        :kwarg options_prefix: an optional prefix used to distinguish
+               PETSc options.  If not provided a unique prefix will be
+               created.  Use this option if you want to pass options
+               to the solver from the command line in addition to
+               through the ``solver_parameters`` dict.
+
+        .. code-block:: python
+
+            {'snes_type': 'ksponly'}
+        PETSc flag options should be specified with `bool` values. For example:
+
+        .. code-block:: python
+
+            {'snes_monitor': True}
+        """
+
         parameters, nullspace, options_prefix = solving_utils._extract_kwargs(**kwargs)
         
         # Do this first so __del__ doesn't barf horribly if we get an
