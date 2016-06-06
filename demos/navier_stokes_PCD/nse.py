@@ -30,7 +30,7 @@ bcs = [DirichletBC(VW.sub(0), Constant((1, 0)), (4, )),  # Top
 
 # Let's create the nonlinear variational problem since Firedrake is
 # kind enough to do this for us with some bookkeeping under the hood.
-prob = NonlinearVariationalProblem(F, up, bcs = bcs, nest=True)
+prob = NonlinearVariationalProblem(F, up, bcs = bcs, nest=False)
 
 # Notice the new use of "extra_args" to stuff the Reynolds number
 # in.  This dictionary will get passed to the PCD Matrix constructor
