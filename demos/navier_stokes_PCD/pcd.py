@@ -14,7 +14,11 @@ class Bucket(object):
 class PCDMat(object):
     def __init__(self, args):
         # args is a dict that contains the Reynolds number
-        self.Re = args['Re']
+        # setting the default to be 1
+        try:
+            self.Re = args['Re']
+        except:
+            self.Re = Constant(1.0)
 
         return
 
@@ -76,7 +80,11 @@ class PCDMat(object):
         
         S_hat.setPythonContext(shat_ctx)
 
-        F = ctx._jac.M[0,0].handle
+        # Pull out a matrix that works in a MatVec
+        rset, cset = ctx._jac.M.sparsity.dsets
+        isrow = rset.field_ises[0]
+        iscol = cset.field_ises[0]
+        F = ctx._jac.M.handle.getSubMatrix(isrow, iscol=iscol)
         M = PETSc.Mat().createNest([[F, None], [None, S_hat]],
                                    isrows=VW.dof_dset.field_ises,
                                    iscols=VW.dof_dset.field_ises)
