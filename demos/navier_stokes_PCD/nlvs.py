@@ -171,7 +171,7 @@ class NonlinearVariationalSolver(object):
             {'snes_monitor': True}
         """
 
-        parameters, nullspace, options_prefix = solving_utils._extract_kwargs(**kwargs)
+        parameters, nullspace, tnullspace, options_prefix = solving_utils._extract_kwargs(**kwargs)
         
         # Do this first so __del__ doesn't barf horribly if we get an
         # error in __init__
