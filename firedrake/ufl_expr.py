@@ -218,6 +218,9 @@ def reconstruct_element(element, cell=None):
                             ufl.BrokenElement,
                             ufl.FacetElement)):
         return type(element)(reconstruct_element(element._element, cell=cell))
+    if isinstance(element, ufl.CustomPullback):
+        return ufl.CustomPullback(reconstruct_element(element._element, cell=cell),
+                                  element._pullback)
     if isinstance(element, ufl.TensorProductElement):
         return ufl.TensorProductElement(element._A, element._B, cell=cell)
     if isinstance(element, ufl.MixedElement):
