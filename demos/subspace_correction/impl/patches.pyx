@@ -505,4 +505,5 @@ def l2g_end(PETSc.SF sf, PETSc.Vec lvec, PETSc.Vec gvec,
     PetscSFReduceEnd(sf.sf, dtype.ob_mpi, larray, garray, op.ob_mpi)
 
     VecRestoreArrayRead(lvec.vec, &larray)
+
     VecRestoreArray(gvec.vec, &garray)

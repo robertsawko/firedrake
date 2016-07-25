@@ -167,6 +167,7 @@ class SubspaceCorrectionPrec(object):
         :kwarg restriction: If True compute a restriction operator, if
              False, a prolongation operator.
         :returns: a PyOP2 kernel.
+
         The prolongation maps a solution in P1 into Pk using the natural
         embedding.  The restriction maps a residual in the dual of Pk into
         the dual of P1 (it is the dual of the prolongation), computed
