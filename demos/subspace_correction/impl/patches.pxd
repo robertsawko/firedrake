@@ -2,11 +2,23 @@ cimport petsc4py.PETSc as PETSc
 cimport mpi4py.MPI as MPI
 
 
-cdef extern from "petsc.h":
+cdef extern from "mpi-compat.h" nogil:
+    pass
+
+cdef extern from "petsc.h" nogil:
     ctypedef long PetscInt
     ctypedef double PetscScalar
     ctypedef enum PetscBool:
         PETSC_TRUE, PETSC_FALSE
+
+    ctypedef enum ScatterMode:
+        SCATTER_FORWARD
+        SCATTER_REVERSE
+
+    ctypedef enum InsertMode:
+        INSERT_VALUES
+        ADD_VALUES
+
     int PetscMalloc1(PetscInt,void*)
     int PetscFree(void*)
     int PetscSortInt(PetscInt,PetscInt[])
@@ -16,7 +28,10 @@ cdef extern from "petsc.h":
     int VecRestoreArray(PETSc.PetscVec, PetscScalar**)
     int VecRestoreArrayRead(PETSc.PetscVec, const PetscScalar**)
 
-cdef extern from "hash.h":
+    int VecScatterBegin(PETSc.PetscScatter, PETSc.PetscVec, PETSc.PetscVec, InsertMode, ScatterMode)
+    int VecScatterEnd(PETSc.PetscScatter, PETSc.PetscVec, PETSc.PetscVec, InsertMode, ScatterMode)
+
+cdef extern from "hash.h" nogil:
     ctypedef long khiter_t
     ctypedef long khint_t
     struct khash_32_t
@@ -36,7 +51,7 @@ cdef extern from "hash.h":
     khiter_t kh_end(hash_t)
     khint_t kh_size(hash_t)
 
-cdef extern from "petscdmplex.h":
+cdef extern from "petscdmplex.h" nogil:
     int DMPlexGetHeightStratum(PETSc.PetscDM,PetscInt,PetscInt*,PetscInt*)
     int DMPlexGetDepthStratum(PETSc.PetscDM,PetscInt,PetscInt*,PetscInt*)
 
@@ -48,21 +63,28 @@ cdef extern from "petscdmplex.h":
     int DMPlexGetTransitiveClosure(PETSc.PetscDM,PetscInt,PetscBool,PetscInt *,PetscInt *[])
     int DMPlexRestoreTransitiveClosure(PETSc.PetscDM,PetscInt,PetscBool,PetscInt *,PetscInt *[])
 
-cdef extern from "petscdmlabel.h":
+cdef extern from "petscdmlabel.h" nogil:
     struct _n_DMLabel
     ctypedef _n_DMLabel* DMLabel "DMLabel"
     int DMLabelCreateIndex(DMLabel, PetscInt, PetscInt)
     int DMLabelHasPoint(DMLabel, PetscInt, PetscBool*)
 
-cdef extern from "petscdm.h":
+cdef extern from "petscdm.h" nogil:
     int DMGetLabel(PETSc.PetscDM,char[],DMLabel*)
 
-cdef extern from "petscis.h":
+cdef extern from "petscis.h" nogil:
     int PetscSectionGetOffset(PETSc.PetscSection,PetscInt,PetscInt*)
     int PetscSectionGetDof(PETSc.PetscSection,PetscInt,PetscInt*)
+    int ISGetBlockSize(PETSc.PetscIS, PetscInt*)
+    int ISBlockGetLocalSize(PETSc.PetscIS, PetscInt*)
+    int ISBlockGetIndices(PETSc.PetscIS, PetscInt*[])
+    int ISBlockRestoreIndices(PETSc.PetscIS, PetscInt*[])
 
-cdef extern from "petscsf.h":
+cdef extern from "petscsf.h" nogil:
     int PetscSFBcastBegin(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,)
     int PetscSFBcastEnd(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*)
     int PetscSFReduceBegin(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,MPI.MPI_Op)
     int PetscSFReduceEnd(PETSc.PetscSF,MPI.MPI_Datatype,const void*, void*,MPI.MPI_Op)
+
+cdef extern from "petscksp.h" nogil:
+    int KSPSolve(PETSc.PetscKSP, PETSc.PetscVec, PETSc.PetscVec)

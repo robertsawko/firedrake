@@ -1,7 +1,7 @@
 #!/bin/sh
 
-mpiexec -n 2 python subspace_correction.py 10 1 \
-     -ksp_type cg \
+mpiexec -n 1 python subspace_correction.py 20 2 \
+     -ksp_type gmres \
      -ksp_monitor_true_residual \
      -pc_type composite \
      -pc_composite_type additive \
@@ -10,6 +10,6 @@ mpiexec -n 2 python subspace_correction.py 10 1 \
      -sub_0_sub_ksp_type preonly \
      -sub_0_sub_pc_type lu \
      -sub_1_pc_python_type impl.P1PC \
-     -sub_1_lo_pc_type lu
+     -sub_1_lo_pc_type hypre
 
 
