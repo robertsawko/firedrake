@@ -119,7 +119,7 @@ header = componentformat.format("Package", "Branch", "Revision", "Modified")
 line = "-" * (len(header) - 1) + "\n"
 status_string += line + header + line
 for dir, d in iteritems(status):
-    status_string += componentformat.format(dir, d["branch"], d["revision"], d["modified"])
+    status_string += componentformat.format(dir, d["branch"].decode(), d["revision"].decode(), d["modified"])
 status_string += line
 
 print(status_string)
