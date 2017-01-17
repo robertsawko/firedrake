@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 from __future__ import absolute_import, print_function, division
 import logging
 import platform
@@ -667,9 +667,9 @@ def pip_uninstall(package):
         # gives me everything.
         lines = check_output(pip + ["freeze", "-l"])
         again = False
-        for line in lines.split("\n"):
+        for line in lines.split(b"\n"):
             # Do we have a locally installed package?
-            if line.startswith(package):
+            if line.startswith(package.encode()):
                 # Uninstall it.
                 run_pip(["uninstall", "-y", line.strip()])
                 # Go round again, because THERE MIGHT BE ANOTHER ONE!
@@ -716,7 +716,7 @@ def build_and_install_h5py():
     else:
         try:
             petsc_dir = check_output(python +
-                                     ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
+                                     ["-c", "import petsc; print(petsc.get_petsc_dir())"]).strip()
 
             petsc_arch = ""
         except subprocess.CalledProcessError:
@@ -1221,10 +1221,13 @@ if mode == "install":
         packages.remove("petsc4py")
         packages.remove("firedrake")
         v = sys.version_info
-        easyinstall = file("../lib/python%d.%d/site-packages/easy-install.pth" % (v.major, v.minor), "r").readlines()
-        new_packages = [os.getcwd() + "/" + p + "\n" for p in packages]
-        file("../lib/python%d.%d/site-packages/easy-install.pth" % (v.major, v.minor), "w").writelines(
-            easyinstall[:1] + new_packages + easyinstall[1:])
+        try:
+            easyinstall = open("../lib/python%d.%d/site-packages/easy-install.pth" % (v.major, v.minor), "r").readlines()
+            new_packages = [os.getcwd() + "/" + p + "\n" for p in packages]
+            open("../lib/python%d.%d/site-packages/easy-install.pth" % (v.major, v.minor), "w").writelines(
+                easyinstall[:1] + new_packages + easyinstall[1:])
+        except FileNotFoundError:
+            pass
 
     build_update_script()
 
