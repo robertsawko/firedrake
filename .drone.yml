@@ -59,6 +59,12 @@ pipeline:
       # Run the dolfin-adjoint tests
       - cd ../dolfin-adjoint
       - sudo -EHu firedrake env PATH="$PATH" py.test -v tests_firedrake/
+      # Now run the notebook tests
+      - pip install jupyter
+      # FIXME: update to release when relevant feature makes it to pypi.
+      - pip install git+https://github.com/computationalmodelling/nbval.git@529a60e#egg=nbval
+      - cd ../firedrake/docs/notebooks
+      - sudo -EHu firedrake env PATH="$PATH" py.test -v --nbval --current-env .
   # Codecov
   codecov:
     image: alpine:3.5
