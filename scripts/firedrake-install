@@ -8,7 +8,7 @@ import os
 import shutil
 from glob import glob
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from distutils import dir_util
 import time
 import datetime
@@ -279,6 +279,8 @@ class directory(object):
 
 
 class timing(object):
+    all_timings = defaultdict(float)
+
     def __init__(self, name):
         self.start = time.time()
         self.name = name
@@ -288,6 +290,7 @@ class timing(object):
 
     def __exit__(self, *args):
         end = time.time()
+        self.all_timings[self.name] += end - self.start
         log.info("'{0}' took {1:.2g} seconds ({2}--{3})"
                  .format(self.name,
                          end - self.start,
@@ -529,7 +532,7 @@ def run_pip(args):
 
 
 def run_pip_install(pipargs):
-    with timing("pip install %s" % " ".join(args)):
+    with timing("pip install %s" % " ".join(pipargs)):
         if args.log:
             # Make pip verbose when logging, so we see what the
             # subprocesses wrote out.
@@ -1379,6 +1382,12 @@ if mode == "update":
 
 
 os.chdir("../..")
+
+log.info("\n\nfiredrake-%s timings summary.\n" % mode)
+log.info("=========================================\n")
+for k, v in reversed(sorted(timing.all_timings.iteritems(), key=lambda x: x[1])):
+    log.info("%s %s", k, v)
+log.info("\n")
 
 log.info("\n\nSuccessfully installed Firedrake.\n")
 
