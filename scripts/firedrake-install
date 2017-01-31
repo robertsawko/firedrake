@@ -10,6 +10,8 @@ from glob import glob
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from collections import OrderedDict
 from distutils import dir_util
+import time
+import datetime
 
 adjoint_deps = {
     "libadjoint": "git+ssh://bitbucket.org/dolfin-adjoint/libadjoint.git",
@@ -276,6 +278,23 @@ class directory(object):
         os.chdir(self.olddir)
 
 
+class timing(object):
+    def __init__(self, name):
+        self.start = time.time()
+        self.name = name
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        end = time.time()
+        log.info("'{0}' took {1:.2g} seconds ({2}--{3})"
+                 .format(self.name,
+                         end - self.start,
+                         datetime.datetime.fromtimestamp(self.start).strftime("%X"),
+                         datetime.datetime.fromtimestamp(end).strftime("%X")))
+
+
 options = config["options"]
 
 # Apply short cut package names.
@@ -352,17 +371,18 @@ def check_output(args, env=None):
 
 
 def brew_install(name, options=None):
-    try:
-        # Check if it's already installed
-        check_call(["brew", "list", name])
-    except subprocess.CalledProcessError:
-        # If not found, go ahead and install
-        arguments = [name]
-        if options:
-            arguments = options + arguments
-        if args.verbose:
-            arguments = ["--verbose"] + arguments
-        check_call(["brew", "install"] + arguments)
+    with timing("brew install %s" % name):
+        try:
+            # Check if it's already installed
+            check_call(["brew", "list", name])
+        except subprocess.CalledProcessError:
+            # If not found, go ahead and install
+            arguments = [name]
+            if options:
+                arguments = options + arguments
+            if args.verbose:
+                arguments = ["--verbose"] + arguments
+            check_call(["brew", "install"] + arguments)
 
 
 def apt_check(name):
@@ -380,11 +400,12 @@ def apt_check(name):
 
 def apt_install(names):
     log.info("Installing missing packages: %s." % ", ".join(names))
-    if sys.stdin.isatty():
-        subprocess.check_call(["sudo", "apt-get", "install"] + names)
-    else:
-        log.info("Non-interactive stdin detected; installing without prompts")
-        subprocess.check_call(["sudo", "apt-get", "-y", "install"] + names)
+    with timing("apt install %s" % " ".join(names)):
+        if sys.stdin.isatty():
+            subprocess.check_call(["sudo", "apt-get", "install"] + names)
+        else:
+            log.info("Non-interactive stdin detected; installing without prompts")
+            subprocess.check_call(["sudo", "apt-get", "-y", "install"] + names)
 
 
 def split_requirements_url(url):
@@ -502,18 +523,20 @@ def git_update(name, url=None):
 
 
 def run_pip(args):
-    log.info(" ".join(pip + args))
-    check_call(pip + args)
+    with timing("pip %s" % " ".join(args)):
+        log.info(" ".join(pip + args))
+        check_call(pip + args)
 
 
 def run_pip_install(pipargs):
-    if args.log:
-        # Make pip verbose when logging, so we see what the
-        # subprocesses wrote out.
-        # Particularly important for debugging petsc fails.
-        pipargs = ["-vvv"] + pipargs
-    log.info(" ".join(pipinstall + pipargs) + "\n")
-    check_call(pipinstall + pipargs)
+    with timing("pip install %s" % " ".join(args)):
+        if args.log:
+            # Make pip verbose when logging, so we see what the
+            # subprocesses wrote out.
+            # Particularly important for debugging petsc fails.
+            pipargs = ["-vvv"] + pipargs
+        log.info(" ".join(pipinstall + pipargs) + "\n")
+        check_call(pipinstall + pipargs)
 
 
 def run_cmd(args):
@@ -683,201 +706,206 @@ def pip_uninstall(package):
 
 
 def build_and_install_h5py():
-    import shutil
-    log.info("Installing h5py\n")
-    # Clean up old downloads
-    if os.path.exists("h5py-2.5.0"):
-        log.info("Removing old h5py-2.5.0 source")
-        shutil.rmtree("h5py-2.5.0")
-    if os.path.exists("h5py.tar.gz"):
-        log.info("Removing old h5py.tar.gz")
-        os.remove("h5py.tar.gz")
+    with timing("install h5py"):
+        import shutil
+        log.info("Installing h5py\n")
+        # Clean up old downloads
+        if os.path.exists("h5py-2.5.0"):
+            log.info("Removing old h5py-2.5.0 source")
+            shutil.rmtree("h5py-2.5.0")
+        if os.path.exists("h5py.tar.gz"):
+            log.info("Removing old h5py.tar.gz")
+            os.remove("h5py.tar.gz")
 
-    url = "git+https://github.com/firedrakeproject/h5py.git@firedrake#egg=h5py"
-    if os.path.exists("h5py"):
-        changed = False
-        with directory("h5py"):
-            # Rewrite old h5py/h5py remote to firedrakeproject/h5py remote.
-            plain_url = split_requirements_url(url)[1]
-            current_remote = check_output(["git", "remote", "-v"]).split()[1]
-            proto = "https" if current_remote.startswith("https") else "ssh"
-            new_remote = git_url(plain_url, proto)
-            if new_remote != current_remote and "h5py/h5py.git" in current_remote:
-                log.info("Updating git remote for h5py from %s to %s", current_remote, new_remote)
-                check_call(["git", "remote", "set-url", "origin", new_remote])
-                check_call(["git", "fetch", "-p", "origin"])
-                check_call(["git", "checkout", "firedrake"])
-                changed = True
-        changed |= git_update("h5py")
-    else:
-        git_clone(url)
-        changed = True
+        url = "git+https://github.com/firedrakeproject/h5py.git@firedrake#egg=h5py"
+        if os.path.exists("h5py"):
+            changed = False
+            with directory("h5py"):
+                # Rewrite old h5py/h5py remote to firedrakeproject/h5py remote.
+                plain_url = split_requirements_url(url)[1]
+                current_remote = check_output(["git", "remote", "-v"]).split()[1]
+                proto = "https" if current_remote.startswith("https") else "ssh"
+                new_remote = git_url(plain_url, proto)
+                if new_remote != current_remote and "h5py/h5py.git" in current_remote:
+                    log.info("Updating git remote for h5py from %s to %s", current_remote, new_remote)
+                    check_call(["git", "remote", "set-url", "origin", new_remote])
+                    check_call(["git", "fetch", "-p", "origin"])
+                    check_call(["git", "checkout", "firedrake"])
+                    changed = True
+            changed |= git_update("h5py")
+        else:
+            git_clone(url)
+            changed = True
 
-    if args.honour_petsc_dir:
-        petsc_dir = os.environ["PETSC_DIR"]
-        petsc_arch = os.environ.get("PETSC_ARCH", "")
-    else:
-        try:
-            petsc_dir = check_output(python +
-                                     ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
+        if args.honour_petsc_dir:
+            petsc_dir = os.environ["PETSC_DIR"]
+            petsc_arch = os.environ.get("PETSC_ARCH", "")
+        else:
+            try:
+                petsc_dir = check_output(python +
+                                         ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
 
-            petsc_arch = ""
-        except subprocess.CalledProcessError:
-            raise InstallError("Unable to find installed PETSc when building h5py")
+                petsc_arch = ""
+            except subprocess.CalledProcessError:
+                raise InstallError("Unable to find installed PETSc when building h5py")
 
-    hdf5_dir = "%s/%s" % (petsc_dir, petsc_arch)
-    log.info("Linking h5py against PETSc found in %s\n" % hdf5_dir)
-    oldcc = os.environ.get("CC", None)
-    os.environ["CC"] = options["mpicc"] or "mpicc"
-    os.environ["HDF5_DIR"] = hdf5_dir
-    os.environ["HDF5_MPI"] = "ON"
-    if changed or args.rebuild:
-        # Only uninstall if things changed.
-        pip_uninstall("h5py")
-        # Pip installing from dirty directory is potentially unsafe.
-        with directory("h5py/"):
-            check_call(["git", "clean", "-fdx"])
-        install("h5py/")
-    if oldcc is None:
-        del os.environ["CC"]
-    else:
-        os.environ["CC"] = oldcc
+        hdf5_dir = "%s/%s" % (petsc_dir, petsc_arch)
+        log.info("Linking h5py against PETSc found in %s\n" % hdf5_dir)
+        oldcc = os.environ.get("CC", None)
+        os.environ["CC"] = options["mpicc"] or "mpicc"
+        os.environ["HDF5_DIR"] = hdf5_dir
+        os.environ["HDF5_MPI"] = "ON"
+        if changed or args.rebuild:
+            # Only uninstall if things changed.
+            pip_uninstall("h5py")
+            # Pip installing from dirty directory is potentially unsafe.
+            with directory("h5py/"):
+                check_call(["git", "clean", "-fdx"])
+            install("h5py/")
+        if oldcc is None:
+            del os.environ["CC"]
+        else:
+            os.environ["CC"] = oldcc
 
 
 def build_and_install_glpsol():
-    log.info("Installing GLPK\n")
-    if os.path.exists("glpk"):
-        glpk_changed = git_update("glpk")
-    else:
-        git_clone("git+https://github.com/firedrakeproject/glpk.git")
-        glpk_changed = True
+    with timing("install glpk"):
+        log.info("Installing GLPK\n")
+        if os.path.exists("glpk"):
+            glpk_changed = git_update("glpk")
+        else:
+            git_clone("git+https://github.com/firedrakeproject/glpk.git")
+            glpk_changed = True
 
-    if glpk_changed:
-        os.chdir("glpk")
-        check_call(["./configure", "--disable-shared", "--disable-static"])
-        check_call(["make"])
-        check_call(["cp", "examples/glpsol", os.environ["VIRTUAL_ENV"] + "/bin/"])
-        os.chdir("..")
+        if glpk_changed:
+            os.chdir("glpk")
+            check_call(["./configure", "--disable-shared", "--disable-static"])
+            check_call(["make"])
+            check_call(["cp", "examples/glpsol", os.environ["VIRTUAL_ENV"] + "/bin/"])
+            os.chdir("..")
 
 
 def build_and_install_libspatialindex():
-    log.info("Installing libspatialindex\n")
-    if os.path.exists("libspatialindex"):
-        libspatialindex_changed = git_update("libspatialindex")
-    else:
-        git_clone("git+https://github.com/firedrakeproject/libspatialindex.git")
-        libspatialindex_changed = True
+    with timing("install spatialindex"):
+        log.info("Installing libspatialindex\n")
+        if os.path.exists("libspatialindex"):
+            libspatialindex_changed = git_update("libspatialindex")
+        else:
+            git_clone("git+https://github.com/firedrakeproject/libspatialindex.git")
+            libspatialindex_changed = True
 
-    if libspatialindex_changed:
-        os.chdir("libspatialindex")
-        # Clean source directory
-        check_call(["git", "reset", "--hard"])
-        check_call(["git", "clean", "-f", "-x", "-d"])
-        # Patch Makefile.am to skip building test
-        check_call(["sed", "-i", "-e", "/^SUBDIRS/s/ test//", "Makefile.am"])
-        # Build and install
-        check_call(["./autogen.sh"])
-        check_call(["./configure", "--prefix=" + sys.prefix,
-                    "--enable-shared", "--disable-static"])
-        check_call(["make"])
-        check_call(["make", "install"])
-        os.chdir("..")
+        if libspatialindex_changed:
+            os.chdir("libspatialindex")
+            # Clean source directory
+            check_call(["git", "reset", "--hard"])
+            check_call(["git", "clean", "-f", "-x", "-d"])
+            # Patch Makefile.am to skip building test
+            check_call(["sed", "-i", "-e", "/^SUBDIRS/s/ test//", "Makefile.am"])
+            # Build and install
+            check_call(["./autogen.sh"])
+            check_call(["./configure", "--prefix=" + sys.prefix,
+                        "--enable-shared", "--disable-static"])
+            check_call(["make"])
+            check_call(["make", "install"])
+            os.chdir("..")
 
 
 def build_and_install_slepc():
-    try:
-        petsc_dir = check_output(python + ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
-        petsc_arch = ""
-    except subprocess.CalledProcessError:
-        raise InstallError("Unable to find installed PETSc when building SLEPc")
+    with timing("install slepc"):
+        try:
+            petsc_dir = check_output(python + ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
+            petsc_arch = ""
+        except subprocess.CalledProcessError:
+            raise InstallError("Unable to find installed PETSc when building SLEPc")
 
-    env = dict(os.environ)
-    env["PETSC_ARCH"] = petsc_arch
-    env["PETSC_DIR"] = petsc_dir
+        env = dict(os.environ)
+        env["PETSC_ARCH"] = petsc_arch
+        env["PETSC_DIR"] = petsc_dir
 
-    log.info("Installing SLEPc.")
-    if os.path.exists("slepc"):
-        slepc_changed = git_update("slepc")
-    else:
-        git_clone("git+https://bitbucket.org/slepc/slepc.git")
-        slepc_changed = True
-    if slepc_changed:
-        install("slepc/")
+        log.info("Installing SLEPc.")
+        if os.path.exists("slepc"):
+            slepc_changed = git_update("slepc")
+        else:
+            git_clone("git+https://bitbucket.org/slepc/slepc.git")
+            slepc_changed = True
+        if slepc_changed:
+            install("slepc/")
 
-    log.info("Installing slepc4py.")
-    if os.path.exists("slepc4py"):
-        slepc4py_changed = git_update("slepc4py")
-    else:
-        git_clone("git+https://bitbucket.org/slepc/slepc4py.git")
-        slepc4py_changed = True
-    if slepc4py_changed:
-        install("slepc4py/")
+        log.info("Installing slepc4py.")
+        if os.path.exists("slepc4py"):
+            slepc4py_changed = git_update("slepc4py")
+        else:
+            git_clone("git+https://bitbucket.org/slepc/slepc4py.git")
+            slepc4py_changed = True
+        if slepc4py_changed:
+            install("slepc4py/")
 
 
 def build_and_install_adjoint():
+    with timing("install dolfin-adjoint"):
+        for package in adjoint_deps:
+            try:
+                git_update(package, adjoint_deps[package])
+            except OSError as e:
+                if e.errno == 2:
+                    log.warn("%s missing, cloning anew.\n" % p)
+                    git_clone(adjoint_deps[package])
+                else:
+                    raise
 
-    for package in adjoint_deps:
-        try:
-            git_update(package, adjoint_deps[package])
-        except OSError as e:
-            if e.errno == 2:
-                log.warn("%s missing, cloning anew.\n" % p)
-                git_clone(adjoint_deps[package])
-            else:
-                raise
+        if args.honour_petsc_dir:
+            petsc_dir = os.environ["PETSC_DIR"]
+            petsc_arch = os.environ.get("PETSC_ARCH", "")
+        else:
+            try:
+                petsc_dir = check_output(python +
+                                         ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
 
-    if args.honour_petsc_dir:
-        petsc_dir = os.environ["PETSC_DIR"]
-        petsc_arch = os.environ.get("PETSC_ARCH", "")
-    else:
-        try:
-            petsc_dir = check_output(python +
-                                     ["-c", "import petsc; print petsc.get_petsc_dir()"]).strip()
+                petsc_arch = ""
+            except subprocess.CalledProcessError:
+                raise InstallError("Unable to find installed PETSc when building h5py")
 
-            petsc_arch = ""
-        except subprocess.CalledProcessError:
-            raise InstallError("Unable to find installed PETSc when building h5py")
+        env = dict(os.environ)
+        env["PETSC_ARCH"] = petsc_arch
+        env["PETSC_DIR"] = petsc_dir
 
-    env = dict(os.environ)
-    env["PETSC_ARCH"] = petsc_arch
-    env["PETSC_DIR"] = petsc_dir
+        os.chdir("libadjoint")
+        dir_util.mkpath("build")
 
-    os.chdir("libadjoint")
-    dir_util.mkpath("build")
+        os.chdir("build")
+        log.info("Configuring libadjoint for virtualenv installation in %s" % os.environ["VIRTUAL_ENV"])
+        check_call(["cmake", "-DCMAKE_INSTALL_PREFIX=%s" % os.environ["VIRTUAL_ENV"], ".."], env=env)
+        log.info("Installing libadjoint.")
+        check_call(["make", "install"])
+        os.chdir("../..")
 
-    os.chdir("build")
-    log.info("Configuring libadjoint for virtualenv installation in %s" % os.environ["VIRTUAL_ENV"])
-    check_call(["cmake", "-DCMAKE_INSTALL_PREFIX=%s" % os.environ["VIRTUAL_ENV"], ".."], env=env)
-    log.info("Installing libadjoint.")
-    check_call(["make", "install"])
-    os.chdir("../..")
-
-    install("dolfin-adjoint/")
+        install("dolfin-adjoint/")
 
 
 def build_and_install_slope():
-    log.info("Installing SLOPE\n")
-    if os.path.exists("SLOPE"):
-        slope_changed = git_update("SLOPE")
-    else:
-        git_clone("git+https://github.com/coneoproject/SLOPE.git")
-        slope_changed = True
+    with timing("install SLOPE"):
+        log.info("Installing SLOPE\n")
+        if os.path.exists("SLOPE"):
+            slope_changed = git_update("SLOPE")
+        else:
+            git_clone("git+https://github.com/coneoproject/SLOPE.git")
+            slope_changed = True
 
-    if slope_changed:
-        os.chdir("SLOPE")
-        # Clean source directory
-        check_call(["git", "reset", "--hard"])
-        check_call(["git", "clean", "-f", "-x", "-d"])
-        # Build and install (hack: need to do this manually as SLOPE is
-        # still stupid and doesn't have a proper configure+make+install system)
-        check_call(["make"])
-        check_call(["mv"] + glob(os.path.join('lib', '*')) + [os.path.join(sys.prefix, 'lib')])
-        include_dir = os.path.join(sys.prefix, 'include', 'SLOPE')
-        check_call(["mkdir", "-p", include_dir])
-        check_call(["cp"] + glob(os.path.join('sparsetiling', 'include', '*')) + [include_dir])
-        # Also install the Python interface
-        run_cmd(pyinstall)
-        os.chdir("..")
+        if slope_changed:
+            os.chdir("SLOPE")
+            # Clean source directory
+            check_call(["git", "reset", "--hard"])
+            check_call(["git", "clean", "-f", "-x", "-d"])
+            # Build and install (hack: need to do this manually as SLOPE is
+            # still stupid and doesn't have a proper configure+make+install system)
+            check_call(["make"])
+            check_call(["mv"] + glob(os.path.join('lib', '*')) + [os.path.join(sys.prefix, 'lib')])
+            include_dir = os.path.join(sys.prefix, 'include', 'SLOPE')
+            check_call(["mkdir", "-p", include_dir])
+            check_call(["cp"] + glob(os.path.join('sparsetiling', 'include', '*')) + [include_dir])
+            # Also install the Python interface
+            run_cmd(pyinstall)
+            os.chdir("..")
 
 
 def clean_obsolete_packages():
