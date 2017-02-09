@@ -46,7 +46,7 @@ pipeline:
 
       # Install firedrake
       - cd $FIREDRAKE_HOME
-      - PETSC_CONFIGURE_OPTIONS="--with-make-np=1" $GIT_SOURCE_DIR/scripts/firedrake-install --disable-ssh --minimal-petsc --slepc --adjoint --slope --install thetis --install gusto --petsc-int-type ${PETSC_INT_TYPE}
+      - PETSC_CONFIGURE_OPTIONS="--with-make-np=1" $GIT_SOURCE_DIR/scripts/firedrake-install --disable-ssh --minimal-petsc --slepc --adjoint --slope --install thetis --install gusto --petsc-int-type ${PETSC_INT_TYPE} --package-branch PyOP2 int64 
 
       # Activate the virtualenv
       - . firedrake/bin/activate
