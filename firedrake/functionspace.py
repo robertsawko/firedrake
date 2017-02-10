@@ -47,8 +47,18 @@ def make_scalar_element(mesh, family, degree, vfamily, vdegree):
     topology = mesh.topology
     cell = topology.ufl_cell()
 
-    if isinstance(cell, ufl.TensorProductCell) \
-       and vfamily is not None and vdegree is not None:
+    if (family in ["HDiv Trace",
+                   "Discontinuous Lagrange Trace",
+                   "DGT"] and vdegree is not None):
+        assert isinstance(cell, ufl.TensorProductCell), (
+            "Specifying a vertical degree requires a "
+            "tensor product cell"
+        )
+        return ufl.FiniteElement(family, cell=cell,
+                                 degree=(degree, vdegree))
+
+    elif (isinstance(cell, ufl.TensorProductCell)
+          and vfamily is not None and vdegree is not None):
         la = ufl.FiniteElement(family,
                                cell=cell.sub_cells()[0],
                                degree=degree)

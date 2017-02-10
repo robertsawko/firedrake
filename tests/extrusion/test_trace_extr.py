@@ -13,7 +13,7 @@ def test_trace_galerkin_projection_extr(degree, quad):
     x, y, z = SpatialCoordinate(mesh)
     f.interpolate(cos(2*pi*x)*cos(2*pi*y)*cos(2*pi*z))
 
-    T = FunctionSpace(mesh, "HDiv Trace", (degree + 1, degree + 1))
+    T = FunctionSpace(mesh, "HDiv Trace", degree + 1, vdegree=degree + 1)
     u = TrialFunction(T)
     v = TestFunction(T)
 
